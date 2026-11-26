@@ -1,0 +1,37 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+docs/*
+reports/*
+# Local checkpoints and cached documents
+.validator_cache/
+
+# Local databases
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Development backups
+*backup*.py
+*pre_langgraph.py
+*pre_cache.py
+# Development files
+.vscode/
+*backup*
+*pre_*
+Hackathon.py
+
+# Local archives and diagnostics
+*.zip
+*.log
+*.sqlite*
+.pytest_cache/
+
+# Experimental model comparison
+compare_models_v08.py
+
