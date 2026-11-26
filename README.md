@@ -1,4 +1,4 @@
-# REQ-AGENT
+# RequirGents
 
 **BCC-HUB × MNU FinTech Hackathon · v0.8 Release Candidate**
 
