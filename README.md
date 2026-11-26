@@ -1,4 +1,4 @@
-# AI Requirements Validator
+# ReqAgent
 
 **BCC-HUB × MNU FinTech Hackathon · v0.8 Release Candidate**
 
