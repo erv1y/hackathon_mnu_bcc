@@ -22,6 +22,7 @@ const state = {
   checkMode: "deep",
   running: false,
   audit: null,
+  auditorRetry: null,
   snapshot: null,
   demo: null,
   run: null,
@@ -427,11 +428,11 @@ function makeRequest(snapshot = null, mode = state.checkMode) {
 let clock;
 const WORKFLOW_STEPS = ["readDocument", "findRequirements", "checkQuality", "verifyResults", "assembleReport"];
 
-function setWorkflowStep(index) {
+function setWorkflowStep(index, failed = false) {
   $("progress-title").textContent = msg(WORKFLOW_STEPS[index]);
   $("workflow-steps").replaceChildren(...WORKFLOW_STEPS.map((key, step) => {
-    const phase = element("li", step < index ? "done" : step === index ? "current" : "");
-    const status = step < index ? "ready" : step === index ? "running" : "waitStage";
+    const phase = element("li", step < index ? "done" : step === index ? (failed ? "failed" : "current") : "");
+    const status = step < index ? "ready" : step === index ? (failed ? "failed" : "running") : "waitStage";
     if (step === index) phase.setAttribute("aria-current", "step");
     phase.append(element("span", "phase-indicator", step < index ? "✓" : ""),
       element("span", "", msg(key)), element("span", "hint", msg(status)));
@@ -500,6 +501,10 @@ function renderProgress(agents) {
   show($("progress-details"), Boolean(agents.length));
 }
 
+function auditorFailureKey(code) {
+  return code === "auditor_validation_failed" ? "auditorValidationFailed" : "auditorProviderFailed";
+}
+
 function handleEvent(event) {
   if (event.type === "document_ready") {
     renderDocumentSummary("live-preview", event.source);
@@ -518,20 +523,26 @@ function handleEvent(event) {
   } else if (event.type === "agent_retry") {
     const item = [...$("agent-list").children].find((row) => row.dataset.key === event.key);
     if (item) item.lastChild.textContent = msg("agentRetry");
-  } else if (event.type === "agent_done") {
-    sceneEvent({ type: "agent_done", key: event.key, ok: event.ok });
+  } else if (event.type === "agent_done" || event.type === "agent_reused") {
+    sceneEvent({ type: "agent_done", key: event.key, ok: event.ok, code: event.code });
     const item = [...$("agent-list").children].find((row) => row.dataset.key === event.key);
     if (item) {
       item.className = `agent-item ${event.ok ? "done" : "failed"}`;
-      item.lastChild.textContent = msg(event.ok ? "ready" : "failed");
-      $("progress-bar").value += 1;
+      item.lastChild.textContent = msg(event.type === "agent_reused" ? "agentRestored"
+        : event.ok ? "ready" : event.code ? auditorFailureKey(event.code) : "failed");
+      if (event.ok) $("progress-bar").value += 1;
     }
   } else if (event.type === "validating") {
     setWorkflowStep(3);
     sceneEvent({ type: "validating" });
   } else if (event.type === "result") {
-    setWorkflowStep(4);
-    sceneEvent({ type: "result" });
+    if (event.auditor_failure) {
+      setWorkflowStep(3, true);
+      sceneEvent({ type: "partial_result", key: "logic", code: event.auditor_failure });
+    } else {
+      setWorkflowStep(4);
+      sceneEvent({ type: "result" });
+    }
     return event;
   } else if (event.type === "error") {
     throw new Error(event.detail || msg("reviewFailed"));
@@ -574,12 +585,19 @@ async function readReport(response) {
   return result;
 }
 
-async function runAudit(snapshot = null, mode = state.checkMode, baseline = null) {
+async function runAudit(snapshot = null, mode = state.checkMode, baseline = null, retry = null) {
   if (state.running || !$("auth-overlay").classList.contains("hidden")) return;
   error();
   let request;
   try {
     request = makeRequest(snapshot, mode);
+    if (retry?.token) {
+      request.form.set("retry_token", retry.token);
+      request.form.set("cache", "false");
+    } else if (retry?.cache) {
+      if (!$("cache-consent").checked) throw new Error(msg("cacheOptIn"));
+      request.form.set("cache", "true");
+    }
   } catch (failure) {
     error(failure.message);
     return;
@@ -602,13 +620,17 @@ async function runAudit(snapshot = null, mode = state.checkMode, baseline = null
     const response = await fetch(rules ? "/api/audit/rules" : "/api/audit/stream", options);
     if (!response.ok) throw new Error(await responseError(response));
     report = rules ? await response.json() : await readReport(response);
+    const retryInfo = report.auditor_retry;
+    delete report.auditor_retry;
     setReport(report, request.snapshot);
+    state.auditorRetry = retryInfo || null;
+    show($("retry-auditor-btn"), Boolean(state.auditorRetry));
   } catch (failure) {
     error(failure.name === "AbortError" ? msg("cancelled") : (failure.message || msg("reviewFailed")));
   } finally {
     state.abort = null;
     busy(false);
-    sceneEvent(report ? { type: "done", ok: true } : { type: "error" });
+    if (!report?.auditor_failure) sceneEvent(report ? { type: "done", ok: true } : { type: "error" });
   }
   if (report) $("output-title").scrollIntoView({ block: "start" });
   if (report && baseline) await compareWith(baseline);
@@ -658,8 +680,9 @@ function setReport(audit, snapshot, saved = null) {
   state.comparison?.controller?.abort();
   state.comparison = null;
   state.audit = audit;
+  state.auditorRetry = null;
   state.snapshot = snapshot;
-  state.run = saved || registerRun(audit, snapshot);
+  state.run = saved || (audit.auditor_failure ? null : registerRun(audit, snapshot));
   state.agent = "all";
   state.severity = new Set(SEVERITIES);
   resetReviewTools();
@@ -694,7 +717,7 @@ function renderReport() {
   $("result-meta").textContent = [
     source, msg(checkModeKey(reportMode(audit))),
     local ? msg("ruleReview") : audit.native?.passport.run_kind === "cache_hit" ? msg("cachedRun") : msg("completed", { done, total }),
-    audit.native && quick ? msg("quickEstimateNotice") : "",
+    audit.native && (quick || audit.auditor_failure) ? msg("quickEstimateNotice") : "",
     msg("characters", { n: number(audit.spec_chars) }),
   ].filter(Boolean).join(" · ");
   show($("quick-followup"), quick);
@@ -703,12 +726,15 @@ function renderReport() {
   if (extraRisks) $("sanity-notice-text").textContent = msg("sanityNotice", { n: extraRisks });
 
   const messages = [...audit.source_warnings];
-  if (audit.failed_agents.length) {
+  if (audit.auditor_failure) {
+    messages.push(msg(auditorFailureKey(audit.auditor_failure)), msg("auditPartialStatus"));
+  } else if (audit.failed_agents.length) {
     const failed = audit.modules.filter((module) => !module.ok).map((module) => module.title).join(", ");
     messages.push(done ? msg("failedModules", { modules: failed }) : msg("reviewFailed"));
   }
   if (audit.pending_findings) messages.push(msg("notCounted", { n: audit.pending_findings }));
   show($("partial-warning"), messages.length > 0, messages.join(" "));
+  show($("retry-auditor-btn"), Boolean(state.auditorRetry));
   show($("check-details"), audit.report_format.show_coverage);
   show($("export-btn"), audit.report_format.exports.includes("markdown"));
   show($("export-json-btn"), audit.report_format.exports.includes("json"));
@@ -724,6 +750,7 @@ function renderReport() {
 }
 
 function readinessText(report) {
+  if (report.auditor_failure) return msg("auditPartialStatus");
   const keys = {ready: "readyState", conditionally_ready: "conditionalState", not_ready: "blockedState"};
   return report.native ? msg(keys[report.readiness] || "preliminaryState") : "—";
 }
@@ -802,6 +829,7 @@ function renderNativeTrace(audit) {
 }
 
 function scoreExplanation(audit, language = state.language) {
+  if (audit.auditor_failure) return msg("auditPartialStatus", {}, language);
   if (audit.native) return msg("qualityEstimate", {}, language);
   if (audit.mode === "rules") return msg("ruleScoreExplanation", {}, language);
   const weights = SEVERITIES.map((severity) =>
@@ -825,7 +853,8 @@ function renderDetails() {
       for (const criterion of module.criteria) rules.append(element("li", "", `${criterion.title} · ${criterion.id}`));
       moduleDetails.append(rules);
     } else {
-      moduleDetails.append(element("p", "muted", module.error));
+      moduleDetails.append(element("p", "muted", audit.auditor_failure && module.key === "logic"
+        ? msg(auditorFailureKey(audit.auditor_failure)) : module.error));
     }
     row.append(moduleDetails);
     sections.append(row);
@@ -1028,6 +1057,7 @@ function buildMarkdown() {
     `- ${t("reportVersion")}: ${markdownText(audit.profile.title)} v${audit.profile.version} / ${audit.profile.fingerprint.slice(0, 10)}`,
     `- ${t("date")}: ${new Date(audit.created_at).toLocaleString(LOCALES[audit.language])}`,
   ];
+  if (audit.auditor_failure) lines.push(`- ${t("auditPartialStatus")}`, `- ${t(auditorFailureKey(audit.auditor_failure))}`);
   if (audit.mode === "replay") lines.push(`- ${t("exampleLabel")}.`);
   if (audit.mode === "rules") lines.push(`- ${t("ruleScoreExplanation")}`);
   if (snapshot.title) lines.push(`- ${t("document")}: ${markdownText(snapshot.title)}`);
@@ -1127,6 +1157,9 @@ function bindAuditControls() {
     if (event.key === "Escape") state.abort?.abort();
   });
   $("run-btn").addEventListener("click", () => runAudit());
+  $("retry-auditor-btn").addEventListener("click", () => {
+    if (state.auditorRetry) runAudit(state.snapshot, "deep", null, state.auditorRetry);
+  });
   $("cancel-btn").addEventListener("click", () => state.abort?.abort());
   $("demo-btn").addEventListener("click", () => runDemo());
   $("demo-before").addEventListener("click", () => showDemoVersion("before"));

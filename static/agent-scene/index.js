@@ -184,8 +184,9 @@ class AgentScene {
       case "agent_start":
         if (detail.key === "quick") this.quick.start(); else this.pipeline.agentStart(detail.key);
         break;
-      case "agent_done": this.pipeline.agentDone(detail.key, detail.ok !== false); break;
+      case "agent_done": this.pipeline.agentDone(detail.key, detail.ok !== false, detail.code); break;
       case "validating": this.pipeline.validating(); break;
+      case "partial_result": this.pipeline.partial(detail.key, detail.code); break;
       case "result": this.pipeline.result(); this.quick.result(); break;
       case "done":
         if (detail.ok === false) this.onError();

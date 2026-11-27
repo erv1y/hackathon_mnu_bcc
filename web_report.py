@@ -8,7 +8,7 @@ from agents.auditor import prepare_findings
 from analyzer import build_result
 from core.knowledge_graph import build_knowledge_graph, graph_json
 from document_review import _fix_plan
-from orchestrator import DeepRunResult
+from orchestrator import DeepPartialRunResult, DeepRunResult
 from schemas import SEVERITIES
 from review_insights import build_insights
 
@@ -33,7 +33,9 @@ def agent_list(mode, language):
 
 
 def adapt_report(result, bundle, settings, language, timings=None, anchors=None):
-    deep = isinstance(result, DeepRunResult)
+    audited = isinstance(result, DeepRunResult)
+    partial = isinstance(result, DeepPartialRunResult)
+    deep = audited or partial
     mode = "deep" if deep else "quick"
     report = build_result({}, settings, bundle.text, result.execution_time_seconds, mode="rules",
                           language=language, bundle=bundle, check_mode=mode)
@@ -43,7 +45,7 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
     mappings = {row["report_id"]: row for row in result.passport["id_mapping"]}
     prepared = prepare_findings(result.quality, result.consistency)
     originals = {row["id"]: row for row in prepared}
-    decisions = {row.finding_id: row for row in result.audit.decisions} if deep else {}
+    decisions = {row.finding_id: row for row in result.audit.decisions} if audited else {}
     timings = timings or {}
     anchors = anchors or {}
 
@@ -68,6 +70,8 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
                          elapsed_sec=timings.get(row["key"]))
         for row in agent_list(mode, language)
     }
+    if partial:
+        modules["logic"].update(ok=False, error=result.auditor_failure, status_code=502)
     for finding_id, original in originals.items():
         decision = decisions.get(finding_id)
         if decision and decision.decision not in ("confirmed", "revised"):
@@ -95,7 +99,7 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
                    audit_reason=decision.audit_reason if decision else None)
         # Native recommendations are advisory. A direct replacement requires an exact,
         # uniquely located line, explicitly returned as a proposed rewrite, plus human approval.
-        rewrite = (not candidate and len(proofs) == 1 and len(ids) == 1
+        rewrite = (not partial and not candidate and len(proofs) == 1 and len(ids) == 1
                    and proofs[0]["text"] == requirements[ids[0]].text
                    and "\n" not in recommendation and "\n" not in proofs[0]["text"]
                    and bundle.sources[positions[requirements[ids[0]].source]].text.count(proofs[0]["text"]) == 1
@@ -122,23 +126,27 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
             "status": "risk" if any(not row["review_reason"] for row in linked) else "review" if linked else "clear",
             "assessment": assessment.model_dump(),
         })
-    score = round(mean(row.quality_score for row in assessments.values())) if assessments and not bundle.warnings else None
+    score = round(mean(row.quality_score for row in assessments.values())) if assessments and not bundle.warnings and not partial else None
     counts = {severity: distribution[severity] for severity in SEVERITIES}
-    readiness = result.audit.readiness if deep else None
+    readiness = result.audit.readiness if audited else None
     if readiness == "ready" and bundle.warnings:
         readiness = "conditionally_ready"
-    score_status = ("incomplete" if bundle.warnings else "critical" if readiness == "not_ready"
+    score_status = ("incomplete" if bundle.warnings or partial else "critical" if readiness == "not_ready"
                     else "review" if active or readiness == "conditionally_ready" else "clear")
     report.update(mode="live", provider="Gemini", model=result.passport["configured_model"], score=score,
                   score_status=score_status,
-                  partial=bool(bundle.warnings), modules=list(modules.values()), counts=counts, scored_counts=counts,
+                  partial=partial or bool(bundle.warnings), modules=list(modules.values()), counts=counts,
+                  scored_counts=dict.fromkeys(SEVERITIES, 0) if partial else counts,
+                  failed_agents=["logic"] if partial else [],
+                  auditor_failure=result.auditor_failure if partial else None,
+                  independent_audit=audited,
                   pending_findings=len(findings) - len(active), readiness=readiness,
-                  confirmed_count=len(active) if deep else None, preliminary_count=None if deep else len(active),
+                  confirmed_count=len(active) if audited else None, preliminary_count=None if audited else len(active),
                   native=result.model_dump(mode="json"), source_warnings=list(bundle.warnings),
-                  knowledge_graph=json.loads(graph_json(build_knowledge_graph(result))) if deep else None)
+                  knowledge_graph=json.loads(graph_json(build_knowledge_graph(result))) if audited else None)
     report["document"]["requirements"] = report.pop("native_requirements", [])
     report["insights"] = build_insights(bundle, findings, settings.profile, mode, language)
-    report["coverage"].update(agents_completed=len(modules), agents_total=len(modules),
-                              criteria_in_completed_agents=len(CRITERIA), criteria_total=len(CRITERIA))
-    report["check"].update(criteria=list(CRITERIA), completed_criteria=list(CRITERIA), minimum_severity="Low")
+    report["coverage"].update(agents_completed=sum(module["ok"] for module in modules.values()), agents_total=len(modules),
+                              criteria_in_completed_agents=0 if partial else len(CRITERIA), criteria_total=len(CRITERIA))
+    report["check"].update(criteria=list(CRITERIA), completed_criteria=[] if partial else list(CRITERIA), minimum_severity="Low")
     return report

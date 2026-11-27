@@ -8,7 +8,7 @@ from core.i18n import tr, localize_graph
 import streamlit as st
 import streamlit.components.v1 as components
 from core.knowledge_graph import build_knowledge_graph, graph_json, render_graph_html, RELATIONS
-from orchestrator import run_validation, CACHE_DIR, DeepRunResult, QuickRunResult
+from orchestrator import run_validation, CACHE_DIR, DeepPartialRunResult, DeepRunResult, QuickRunResult
 from core.advanced_report import generate_pdf, generate_quick_pdf
 from core.localized_quick_view import show_quick_result
 from core.agent_animation import Scene, render_scene
@@ -127,7 +127,8 @@ if view_saved:
             data = json.loads(saved.getvalue())
             if not isinstance(data, dict):
                 raise ValueError(t('Ожидается объект JSON.'))
-            imported_result = (DeepRunResult if 'audit' in data else QuickRunResult).model_validate(data)
+            model = DeepRunResult if 'audit' in data else DeepPartialRunResult if 'auditor_failure' in data else QuickRunResult
+            imported_result = model.model_validate(data)
             if 'audit' in data and any(d.final_severity not in SEVERITY for d in imported_result.audit.decisions if d.decision in ('confirmed', 'revised')):
                 raise ValueError(t('У сохранённого замечания отсутствует серьёзность.'))
         except Exception as error:
@@ -205,7 +206,8 @@ else:
                 result = run_validation(input_paths, progress_callback=update, reports_dir=output,
                                         use_cache=cache, force_reanalysis=cache and force, mode=mode)
                 progress.progress(95, text=t('Формирование PDF...'))
-                if scene.phase not in ('report', 'cache'):
+                partial = isinstance(result, DeepPartialRunResult)
+                if not partial and scene.phase not in ('report', 'cache'):
                     scene.finish('report')
                     draw_scene()
                 # Keep valid JSON available even if PDF generation fails.
@@ -213,16 +215,22 @@ else:
                 st.session_state.file_identity = identity
                 st.session_state.run_events = events
                 st.session_state.report_name = f'{input_paths[0].stem}_report.pdf' if len(input_paths) == 1 else 'combined_report.pdf'
-                if mode == 'quick':
+                if partial:
+                    st.session_state.report_name = 'deep_partial_report.pdf'
+                    pdf = generate_quick_pdf(result, output / 'deep_partial_report.pdf')
+                elif mode == 'quick':
                     st.session_state.report_name = 'quick_preliminary_report.pdf'
                     pdf = generate_quick_pdf(result, output / 'quick_report.pdf')
                 else:
                     pdf = generate_pdf(result, output / 'validation_report.pdf')
                 st.session_state.pdf_bytes = pdf.read_bytes()
-            scene.finish('done')
+            scene.finish('error' if partial else 'done')
             draw_scene()
-            progress.progress(100, text=t('Анализ завершён!'))
-            stage.success(t('Готово'))
+            if partial:
+                stage.warning(t('Независимый аудит не завершён.'))
+            else:
+                progress.progress(100, text=t('Анализ завершён!'))
+                stage.success(t('Готово'))
             timer.caption((t('Текущий запуск с PDF: ') + f'{time.perf_counter() - started:.1f}' + t(' сек.')))
         except Exception as error:
             scene.finish('export_error' if st.session_state.result is not None else 'error')
@@ -236,7 +244,7 @@ else:
 
 if view_saved:
     result = imported_result
-    mode = 'deep' if isinstance(result, DeepRunResult) else 'quick'
+    mode = 'deep' if isinstance(result, (DeepRunResult, DeepPartialRunResult)) else 'quick'
     pdf_bytes = imported_pdf
     report_name = saved_pdf.name if imported_pdf is not None else 'saved_report.pdf'
     events = []
@@ -252,7 +260,7 @@ else:
 if result is not None:
     st.caption(t('Тексты отчёта и исходные цитаты сохранены на языке анализа.'))
 
-if result is not None and mode == 'quick':
+if result is not None and (mode == 'quick' or isinstance(result, DeepPartialRunResult)):
     show_quick_result(result, pdf_bytes, events, lang=lang)
     st.stop()
 

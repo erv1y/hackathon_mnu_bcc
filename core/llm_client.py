@@ -9,6 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types, errors
+from httpx2 import TransportError
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -40,6 +41,13 @@ RETRYABLE_ERRORS = {
 }
 
 
+class GeminiRequestError(RuntimeError):
+    """The provider did not return a usable response."""
+    def __init__(self, message, code=None):
+        self.code = code
+        super().__init__(message)
+
+
 def ask_gemini(
     prompt,
     system_instruction=None,
@@ -48,7 +56,7 @@ def ask_gemini(
 ):
 
     if not API_KEY:
-        raise ValueError(
+        raise GeminiRequestError(
             "GEMINI_API_KEY is missing from the environment or .env"
         )
 
@@ -191,18 +199,18 @@ def ask_gemini(
                         continue
 
                     if code not in RETRYABLE_ERRORS:
-                        raise
+                        raise GeminiRequestError("Gemini rejected the request.", code) from error
 
                     print(
                         "[FALLBACK] Trying next model"
                     )
 
-                except TimeoutError as error:
+                except (TimeoutError, TransportError) as error:
 
                     last_error = error
 
                     print(
-                        f"[TIMEOUT] {current_model}"
+                        f"[TRANSPORT] {current_model}: {type(error).__name__}"
                     )
 
             if len(unavailable_models) == len(models):
@@ -222,9 +230,9 @@ def ask_gemini(
 
                 time.sleep(delay)
 
-    raise RuntimeError(
-        "All AI models are temporarily unavailable. "
-        "Check Gemini API quotas and service status."
+    raise GeminiRequestError(
+        "All AI models are temporarily unavailable. Check Gemini API quotas and service status.",
+        getattr(last_error, "code", None),
     ) from last_error
 
 

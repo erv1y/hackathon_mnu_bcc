@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from orchestrator import run_validation, print_summary
+from orchestrator import run_validation, print_summary, DeepPartialRunResult
 from core.advanced_report import generate_pdf, generate_quick_pdf
 
 def main():
@@ -18,9 +18,10 @@ def main():
     try:
         result=run_validation(args.input, reports_dir=args.output.parent, use_cache=args.cache, force_reanalysis=args.force, mode=args.mode)
         print_summary(result)
-        (generate_quick_pdf if args.mode=='quick' else generate_pdf)(result,args.output)
+        partial = isinstance(result, DeepPartialRunResult)
+        (generate_quick_pdf if args.mode=='quick' or partial else generate_pdf)(result,args.output)
         print('[PDF]',args.output)
-        return 0
+        return 2 if partial else 0
     except Exception as exc:
         print('[ERROR]',exc)
         return 1

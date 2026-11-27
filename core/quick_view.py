@@ -23,8 +23,15 @@ def generate_quick_pdf(result, output_path):
     story = []
     def add(text, style=body):
         story.append(Paragraph(escape(str(text)).replace('\n', '<br/>'), style))
-    add('Quick Validation — предварительный отчёт', heading)
-    add('Один AI-агент. Независимый аудит не выполнялся. Результаты требуют проверки специалистом.')
+    partial = getattr(result, 'auditor_failure', None)
+    if partial:
+        add('Deep Validation — частичный отчёт', heading)
+        reason = ('Проверка решений аудитора не пройдена.' if partial == 'auditor_validation_failed'
+                  else 'Аудитор не получил пригодного ответа от Gemini.')
+        add(reason + ' Независимый аудит не завершён. Готовность не оценена.')
+    else:
+        add('Quick Validation — предварительный отчёт', heading)
+        add('Один AI-агент. Независимый аудит не выполнялся. Результаты требуют проверки специалистом.')
     add('Документы: ' + ', '.join(result.source_files))
     add(f'Время текущего запуска: {result.execution_time_seconds} сек.')
     add(f'Требований: {len(result.extraction.requirements)}; замечаний качества: {sum(len(a.findings) for a in result.quality.assessments)}; замечаний согласованности: {len(result.consistency.findings)}. Эти категории могут пересекаться.')
@@ -46,7 +53,7 @@ def generate_quick_pdf(result, output_path):
         for e in f.evidence:
             add(f'{e.requirement_id} | {e.source} | стр. {e.page or "—"}, абз. {e.paragraph or "—"}: {e.quote}')
         add(f'Рекомендация: {f.recommendation}')
-    SimpleDocTemplate(str(path), pagesize=A4, title='Quick Validation - Preliminary').build(story)
+    SimpleDocTemplate(str(path), pagesize=A4, title='Deep Validation - Partial' if partial else 'Quick Validation - Preliminary').build(story)
     return path
 
 

@@ -159,22 +159,31 @@ class ExtractionAudit(BaseModel):
     comments: str
 
 
-class AuditResult(BaseModel):
+class AuditSummary(BaseModel):
     extraction_audit: ExtractionAudit
+    readiness: Literal["ready", "conditionally_ready", "not_ready"]
+    executive_summary: str
+    priority_actions: list[str]
+    limitations: list[str]
 
+
+class AuditPatch(BaseModel):
     decisions: list[AuditDecision]
 
-    readiness: Literal[
-        "ready",
-        "conditionally_ready",
-        "not_ready"
-    ]
 
-    executive_summary: str
+class AuditResult(AuditSummary, AuditPatch):
+    pass
 
-    priority_actions: list[str]
 
-    limitations: list[str]
+class AuditMerge(BaseModel):
+    finding_id: str
+    merged_into: str
+    audit_reason: str
+
+
+class AuditMergePlan(BaseModel):
+    merges: list[AuditMerge]
+
 
 class ValidationResult(BaseModel):
     source_files: list[str]

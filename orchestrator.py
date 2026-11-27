@@ -1,14 +1,16 @@
 import argparse
 import hashlib
 import json
+import logging
 import os
 import time
 from collections import Counter
+from contextlib import nullcontext
 from dataclasses import dataclass
 from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import TypedDict
+from typing import Literal, TypedDict
 from uuid import uuid4
 
 from langgraph.graph import StateGraph, START, END
@@ -26,22 +28,35 @@ from agents.quick_validator import quick_validate, QuickValidationResult
 from agents.extractor import extract_requirements
 from agents.quality_analyst import analyze_quality
 from agents.consistency_analyst import analyze_consistency, validate_findings
-from agents.auditor import audit_results, prepare_findings, validate_audit, audit_trace
+from agents.auditor import (
+    AuditorFailure, AuditValidationError, audit_batch_size, audit_models, audit_results, audit_trace,
+    prepare_findings, validate_assessments, validate_audit, validate_source_registry,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 REPORTS_DIR = BASE_DIR / 'reports'
 CACHE_DIR = BASE_DIR / '.validator_cache'
-CACHE_VERSION = '11'
+CACHE_VERSION = '12'
+logger = logging.getLogger(__name__)
 
 class DeepRunResult(ValidationResult):
     passport: dict
 
 class QuickRunResult(QuickValidationResult):
     passport: dict
-    mode: str = 'quick'
+    mode: Literal['quick'] = 'quick'
     source_files: list[str]
     execution_time_seconds: float
     independent_audit: bool = False
+
+class DeepPartialRunResult(QuickValidationResult):
+    passport: dict
+    mode: Literal["deep"] = "deep"
+    source_files: list[str]
+    execution_time_seconds: float
+    independent_audit: Literal[False] = False
+    auditor_failure: Literal["auditor_validation_failed", "auditor_provider_failed"]
+
 
 class ValidationState(TypedDict, total=False):
     mode: str
@@ -112,7 +127,7 @@ def document_key(file_path, mode="deep", context=""):
     for path in paths:
         add(path.name.encode('utf-8'))
         add(path.read_bytes())
-    add(json.dumps([MODEL_NAME, FALLBACK_MODELS]).encode())
+    add(json.dumps([MODEL_NAME, FALLBACK_MODELS, audit_models(), audit_batch_size()]).encode())
     sources = [BASE_DIR / 'orchestrator.py']
     sources += [BASE_DIR / 'core' / name for name in (
         'models.py', 'document_reader.py', 'llm_client.py', 'run_metadata.py', 'rule_engine.py', 'business_logic.py', 'counterexample.py', 'release_review.py')]
@@ -208,9 +223,16 @@ def auditor_node(state):
     consistency = ConsistencyAnalysisResult.model_validate(state['consistency'])
     result, models = tracked(timed_analysis, 'Auditor 2.0', audit_results, state['sections'], extraction, quality, consistency, state.get('logic_debug'))
     original_audit = result.model_dump(mode='json')
-    consistency, result, review_debug = finalize_review(extraction, consistency, result, state['sections'])
-    validate_findings(consistency, extraction)
-    validate_audit(result, prepare_findings(quality, consistency), extraction)
+    try:
+        consistency, result, review_debug = finalize_review(extraction, consistency, result, state['sections'])
+        validate_findings(consistency, extraction)
+        validate_audit(result, prepare_findings(quality, consistency), extraction)
+    except AuditValidationError as error:
+        logger.warning("Auditor post-review validation failed: %s", error)
+        raise AuditorFailure("auditor_validation_failed") from None
+    except ValueError:
+        logger.warning("Auditor post-review validation failed: invalid post-review findings")
+        raise AuditorFailure("auditor_validation_failed") from None
     review_debug['pre_review_audit'] = original_audit
     return {'consistency': consistency.model_dump(mode='json'), 'audit': normalize_audit(quality, consistency, result).model_dump(mode='json'), 'audit_models': models, 'release_review_debug': review_debug}
 
@@ -240,6 +262,10 @@ def build_graph(checkpointer=None, node_callback=None, context="", metrics=None)
                 if node_callback:
                     node_callback(name, "completed")
                 return result
+            except AuditorFailure as error:
+                if node_callback:
+                    node_callback(name, error.code)
+                raise
             except Exception:
                 if node_callback:
                     node_callback(name, "failed")
@@ -290,7 +316,7 @@ def export_result(result, folder):
 
 def run_validation(file_path, progress_callback=None, reports_dir=None,
                    use_cache=False, force_reanalysis=False, mode="deep", *,
-                   node_callback=None, sections=None, context="", write_reports=True):
+                   node_callback=None, sections=None, context="", write_reports=True, memory_checkpoint=None):
     if mode not in ("quick", "deep"):
         raise ValueError("Invalid validation mode")
     started = time.perf_counter()
@@ -303,15 +329,21 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
     print(f'[DOCUMENTS] {len(paths)}')
     print('[ENGINE] LangGraph StateGraph')
     # Without consent, checkpoint state exists only in RAM.
+    if use_cache and memory_checkpoint is not None:
+        raise ValueError("Choose one checkpoint store.")
     if use_cache:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         key = document_key(paths, mode, context)
         database = str(CACHE_DIR / f'{key}.sqlite')
+    elif memory_checkpoint is not None:
+        key = 'run'
     else:
         database = ':memory:'
         key = uuid4().hex
     config = {'configurable': {'thread_id': key}}
-    with SqliteSaver.from_conn_string(database) as saver:
+    store = nullcontext(memory_checkpoint) if memory_checkpoint is not None else SqliteSaver.from_conn_string(database)
+    audit_failure = None
+    with store as saver:
         metrics = []
         graph = build_graph(saver, node_callback, context, metrics)
         if force_reanalysis and use_cache:
@@ -332,6 +364,10 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
                 run_kind = 'resume'
                 print(f'[RESUME] Pending nodes: {snapshot.next}')
                 emit_progress(progress_callback, 10, 'Resume', 'Восстановление сохранённых этапов...')
+                if node_callback and mode == 'deep':
+                    for node, field in (('extractor', 'extraction'), ('quality', 'quality'), ('consistency', 'consistency')):
+                        if field in state and node not in snapshot.next:
+                            node_callback(node, "reused")
             else:
                 print('[NEW RUN]')
                 state = dict(initial)
@@ -351,17 +387,22 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
                 else:
                     emit_progress(progress_callback, 15, 'Extractor', 'Agent 1 извлекает требования...')
             progress()
-            for update in graph.stream(None if resume else initial, config, stream_mode='updates'):
-                for node, payload in update.items():
-                    if node not in ('extractor', 'quality', 'consistency', 'auditor', 'quick') or not payload:
-                        continue
-                    state.update(payload)
-                    if node in ('quality', 'consistency'):
-                        completed.add(node)
-                    progress()
+            try:
+                for update in graph.stream(None if resume else initial, config, stream_mode='updates'):
+                    for node, payload in update.items():
+                        if node not in ('extractor', 'quality', 'consistency', 'auditor', 'quick') or not payload:
+                            continue
+                        state.update(payload)
+                        if node in ('quality', 'consistency'):
+                            completed.add(node)
+                        progress()
+            except AuditorFailure as error:
+                audit_failure = error
             snapshot = graph.get_state(config)
             state = dict(snapshot.values)
-            if snapshot.next:
+            if audit_failure and (mode != 'deep' or snapshot.next != ('auditor',)):
+                raise audit_failure
+            if snapshot.next and not audit_failure:
                 raise RuntimeError('Graph did not finish; retry to resume.')
         passport = {'mode': mode, 'run_kind': run_kind, 'analysis_started_utc': state.get('original_started'), 'report_run_utc': now(), 'analysis_revision': state.get('original_revision'), 'current_revision': revision(), 'configured_model': MODEL_NAME, 'successful_responses': {k: state.get(k+'_models', []) for k in (['quick'] if mode == 'quick' else ['extraction','quality','consistency','audit'])}}
         passport["api_attempts"] = len(metrics)
@@ -380,10 +421,22 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
         else:
             passport['logic_coverage'] = {k: v for k, v in state.get('logic_debug', {}).items() if k != 'passes'}
             passport['release_review'] = {k:v for k,v in state.get('release_review_debug', {}).items() if k != 'pre_review_audit'}
-            result = result_from_state(state, time.perf_counter() - started, passport)
+            if audit_failure:
+                extraction = ExtractionResult.model_validate(state['extraction'])
+                quality = QualityAnalysisResult.model_validate(state['quality'])
+                consistency = ConsistencyAnalysisResult.model_validate(state['consistency'])
+                validate_assessments(quality, validate_source_registry(sections, extraction))
+                validate_findings(consistency, extraction)
+                result = DeepPartialRunResult(passport=passport, source_files=state['source_files'],
+                    execution_time_seconds=round(time.perf_counter() - started, 2), extraction=extraction,
+                    quality=quality, consistency=consistency, auditor_failure=audit_failure.code)
+            else:
+                result = result_from_state(state, time.perf_counter() - started, passport)
     result.passport['id_mapping'] = id_mapping(result.extraction.requirements, sections)
     if write_reports and mode == 'quick':
         save_json(result, 'quick_validation.json', folder)
+    elif write_reports and audit_failure:
+        save_json(result, 'partial_validation.json', folder)
     elif write_reports:
         export_result(result, folder)
         (folder / 'release_review.json').write_text(json.dumps(state.get('release_review_debug', {}), ensure_ascii=False, indent=2), encoding='utf-8')
@@ -391,14 +444,19 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
         if state.get('logic_debug'):
             folder.mkdir(parents=True, exist_ok=True)
             (folder / 'formalization_debug.json').write_text(json.dumps(state['logic_debug'], ensure_ascii=False, indent=2), encoding='utf-8')
-    emit_progress(progress_callback, 90, 'Validation Complete', 'Все результаты готовы.')
-    print('[GRAPH] Execution completed')
+    if audit_failure:
+        emit_progress(progress_callback, 90, 'Auditor Failed', 'Независимый аудит не завершён.')
+        logger.warning("Partial Deep report: %s", audit_failure.code)
+    else:
+        emit_progress(progress_callback, 90, 'Validation Complete', 'Все результаты готовы.')
+        print('[GRAPH] Execution completed')
     return result
 
 
 def print_summary(result):
-    if isinstance(result, QuickRunResult):
-        print('QUICK MODE — PRELIMINARY / NO INDEPENDENT AUDIT')
+    if isinstance(result, (QuickRunResult, DeepPartialRunResult)):
+        print('DEEP MODE — PARTIAL / INDEPENDENT AUDIT FAILED' if isinstance(result, DeepPartialRunResult)
+              else 'QUICK MODE — PRELIMINARY / NO INDEPENDENT AUDIT')
         print(f'Requirements: {len(result.extraction.requirements)}')
         print(f'Quality issues: {sum(len(a.findings) for a in result.quality.assessments)}')
         print(f'Consistency issues: {len(result.consistency.findings)}')
@@ -429,8 +487,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     result = run_validation(args.input or [BASE_DIR / 'docs' / 'test.pdf'], use_cache=args.cache, force_reanalysis=args.force, mode=args.mode)
     print_summary(result)
-    if args.mode == 'quick':
+    if isinstance(result, (QuickRunResult, DeepPartialRunResult)):
         from core.advanced_report import generate_quick_pdf
-        generate_quick_pdf(result, REPORTS_DIR / 'quick_report.pdf')
+        generate_quick_pdf(result, REPORTS_DIR / ('partial_report.pdf' if isinstance(result, DeepPartialRunResult) else 'quick_report.pdf'))
     else:
         generate_pdf(result, REPORTS_DIR / 'final_report.pdf')

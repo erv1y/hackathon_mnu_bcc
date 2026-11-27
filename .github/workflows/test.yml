@@ -15,6 +15,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
+      - run: node --test tests/test_auditor_frontend.cjs
       - run: python -m evaluate --check
       - run: python -m evaluate_quality
       - run: python -m evaluate_graph --check-data

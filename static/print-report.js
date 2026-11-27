@@ -29,6 +29,7 @@ function printReport() {
       done: coverage.criteria_in_completed_agents, total: coverage.criteria_total, merged: audit.merged_duplicates,
     })));
   }
+  if (audit.auditor_failure) paper.append(element("p", "print-note", t(auditorFailureKey(audit.auditor_failure))));
   for (const warning of audit.source_warnings) paper.append(element("p", "print-note", warning));
   const files = audit.document.files?.filter((item) => item.name) || [];
   if (files.length) {

@@ -107,19 +107,33 @@ export class Pipeline {
     this.updateChip();
   }
 
-  agentDone(key, ok) {
+  agentDone(key, ok, code) {
     const actor = this.ctx.deepActors.find((item) => item.key === key);
     if (!this.active || !actor) return;
     this.running.delete(key);
     if (key === "payments") this.doc.hide();
-    actor.clear().queue(T.sit(this.ctx.office.desks[key].seat, ok ? "sceneStatusDone" : "sceneStatusWaiting"));
-    actor.status = ok ? "sceneStatusDone" : "sceneStatusWaiting";
+    const status = ok ? "sceneStatusWorkDone" : code === "auditor_validation_failed"
+      ? "auditorValidationFailed" : "failed";
+    actor.clear().queue(T.sit(this.ctx.office.desks[key].seat, status));
+    actor.status = status;
     actor.base.active = 0;
     this.updateChip();
   }
 
   validating() { this.updateChip(); }
   result() { this.finish(); }
+  partial(key, code) {
+    if (!this.active) return;
+    const actor = this.ctx.deepActors.find((item) => item.key === key);
+    this.doc.hide();
+    this.running.clear();
+    this.ctx.setState("partial");
+    if (actor) {
+      this.ctx.overlay.say(actor, this.ctx.t(code === "auditor_validation_failed"
+        ? "auditorValidationFailed" : "auditorProviderFailed"), 4, "pipeline");
+    }
+    this.ctx.overlay.setChip(this.ctx.t("auditPartialStatus"));
+  }
   error() { this.end(); }
   end() { this.reset(); }
 

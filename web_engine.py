@@ -1,22 +1,62 @@
 """Read original uploads and run the shared graph off the ASGI event loop."""
+from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
-from threading import Lock
+from secrets import token_urlsafe
+from threading import Lock, Timer
 from zipfile import ZipFile
 
 from fastapi import HTTPException
+from langgraph.checkpoint.memory import InMemorySaver
 
 from audit_documents import DocumentBundle, DocumentSource, safe_file_name
 from core.document_reader import read_document
-from orchestrator import run_validation
+from orchestrator import document_key, run_validation
 from web_report import AGENTS, adapt_report
 
 EXTENSIONS = {".md", ".txt", ".pdf", ".docx"}
 CACHE_LOCK = Lock()
 WINDOWS_UNSAFE = '<>:"/\\|?*'
+
+
+class AuditRetries:
+    """Short-lived, single-use checkpoints for Deep runs without disk consent."""
+    def __init__(self, limit=4, lifetime=600):
+        self.limit = limit
+        self.lifetime = lifetime
+        self.entries = OrderedDict()
+        self.lock = Lock()
+
+    def discard(self, token):
+        with self.lock:
+            self.entries.pop(token, None)
+
+    def save(self, fingerprint, checkpoint):
+        token = token_urlsafe(32)
+        expiration = Timer(self.lifetime, self.discard, args=(token,))
+        expiration.daemon = True
+        with self.lock:
+            if len(self.entries) >= self.limit:
+                _, (_, _, oldest_expiration) = self.entries.popitem(last=False)
+                oldest_expiration.cancel()
+            self.entries[token] = (fingerprint, checkpoint, expiration)
+            expiration.start()
+        return token
+
+    def take(self, token, fingerprint):
+        with self.lock:
+            entry = self.entries.get(token)
+            if not entry or entry[0] != fingerprint:
+                raise HTTPException(409, "The Auditor retry has expired, or the input has changed.")
+            _, checkpoint, expiration = self.entries.pop(token)
+            expiration.cancel()
+            return checkpoint
+
+
+AUDIT_RETRIES = AuditRetries()
 
 
 def upload_name(name):
@@ -72,7 +112,7 @@ def sources(items, max_chars) -> Iterator:
         yield paths, sections, DocumentBundle(sources), anchors
 
 
-def analyze(items, settings, language, mode, context, max_chars, emit, *, use_cache=False):
+def analyze(items, settings, language, mode, context, max_chars, emit, *, use_cache=False, retry_token=None):
     timings, started = {}, {}
     with sources(items, max_chars) as (paths, sections, bundle, anchors):
         emit({"type": "document_ready", "source": {
@@ -85,10 +125,14 @@ def analyze(items, settings, language, mode, context, max_chars, emit, *, use_ca
             key = AGENTS[node][0]
             if status == "started":
                 started[key] = perf_counter()
-            elif status != "retrying":
+            elif status not in {"retrying", "reused"}:
                 timings[key] = round(perf_counter() - started[key], 2)
-            emit({"type": {"started": "agent_start", "retrying": "agent_retry"}.get(status, "agent_done"),
-                  "key": key, "ok": status != "failed"})
+            event = {"type": {"started": "agent_start", "retrying": "agent_retry",
+                              "reused": "agent_reused"}.get(status, "agent_done"),
+                     "key": key, "ok": status in {"started", "retrying", "reused", "completed"}}
+            if status.startswith("auditor_"):
+                event["code"] = status
+            emit(event)
 
         profile = settings.profile
         context = "\n\n".join(filter(None, (
@@ -96,14 +140,23 @@ def analyze(items, settings, language, mode, context, max_chars, emit, *, use_ca
             profile.guidance,
             context,
         )))
+        memory_checkpoint = None
+        if mode == "deep" and not use_cache:
+            fingerprint = document_key(paths, mode, context)
+            memory_checkpoint = AUDIT_RETRIES.take(retry_token, fingerprint) if retry_token else InMemorySaver()
         with CACHE_LOCK if use_cache else nullcontext():
             result = run_validation(paths, mode=mode, context=context, sections=sections,
-                                    node_callback=on_node, write_reports=False, use_cache=use_cache)
+                                    node_callback=on_node, write_reports=False, use_cache=use_cache,
+                                    memory_checkpoint=memory_checkpoint)
         if bundle.warnings and hasattr(result, "audit"):
             result.audit.limitations.extend(bundle.warnings)
             if result.audit.readiness == "ready":
                 result.audit.readiness = "conditionally_ready"
                 result.audit.executive_summary = "Проверка не охватила все страницы. " + result.audit.executive_summary
-        emit({"type": "validating", "run_kind": result.passport["run_kind"]})
+        if not getattr(result, "auditor_failure", None):
+            emit({"type": "validating", "run_kind": result.passport["run_kind"]})
         report = adapt_report(result, bundle, settings, language, timings, anchors)
+        if report.get("auditor_failure"):
+            report["auditor_retry"] = ({"cache": True} if use_cache else
+                                       {"token": AUDIT_RETRIES.save(fingerprint, memory_checkpoint)})
         return report

@@ -97,7 +97,7 @@ def append_sections(result, output_path, base_generator):
         a=assessments.get(rid)
         rows.append([rid,location(mapping.get(rid, r.model_dump())),f'{status_names.get(a.status, a.status)} / {a.quality_score}' if a else 'нет оценки','\n'.join(issues[rid]) or 'Нет сохранённых замечаний'])
     table(rows,[82,115,80,218])
-    if not hasattr(result,'audit'): add('Предварительные замечания: отдельный аудит не выполнялся; категории могут пересекаться.')
+    if not hasattr(result,'audit'): add('Предварительные замечания: независимый аудит не завершён; категории могут пересекаться.')
     with TemporaryDirectory() as tmp:
         base=Path(tmp)/'base.pdf'; appendix=Path(tmp)/'appendix.pdf'
         base_generator(result,base)

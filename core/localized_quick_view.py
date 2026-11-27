@@ -9,8 +9,13 @@ def show_quick_result(result, pdf_bytes, events, lang="kk"):
     import streamlit as st
     import streamlit.components.v1 as components
     from core.knowledge_graph import RELATIONS, render_graph_html, graph_json
-    st.header(t('2. Quick Validation — предварительный результат'))
-    st.warning(t('Независимый аудит не выполнялся. Готовность к разработке не оценена отдельным аудитором.'))
+    partial = getattr(result, 'auditor_failure', None)
+    if partial:
+        st.header(t('Deep Validation — частичный отчёт'))
+        st.warning(t('Независимый аудит не завершён. Готовность не оценена.'))
+    else:
+        st.header(t('2. Quick Validation — предварительный результат'))
+        st.warning(t('Независимый аудит не выполнялся. Готовность к разработке не оценена отдельным аудитором.'))
     if 'Cache Hit' in events:
         st.success(t('Cache Hit — без новых AI-запросов.'))
     elif 'Resume' in events:
@@ -20,8 +25,8 @@ def show_quick_result(result, pdf_bytes, events, lang="kk"):
         col.metric(label,value)
     st.caption(t('Замечания качества и согласованности могут описывать один дефект.'))
     if pdf_bytes:
-        st.download_button(t('Скачать предварительный PDF'),pdf_bytes,'quick_preliminary_report.pdf','application/pdf')
-    st.download_button(t('Скачать Quick JSON'),result.model_dump_json(indent=2),'quick_validation.json','application/json')
+        st.download_button(t('Скачать предварительный PDF'),pdf_bytes,'deep_partial_report.pdf' if partial else 'quick_preliminary_report.pdf','application/pdf')
+    st.download_button('JSON', result.model_dump_json(indent=2), 'partial_validation.json' if partial else 'quick_validation.json', 'application/json')
     quality, consistency, register, graph_tab = st.tabs([t('Quality'),t('Consistency'),t('Requirements'),t('Knowledge Graph')])
     with quality:
         for a in result.quality.assessments:

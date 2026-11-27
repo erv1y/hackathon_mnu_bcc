@@ -77,7 +77,7 @@ function displayDate(time) {
 }
 
 function auditCounts(report) {
-  const counts = report.mode === "rules" ? report.counts : report.scored_counts;
+  const counts = (report.mode === "rules" || report.auditor_failure) ? report.counts : report.scored_counts;
   return {
     score: report.score === null ? "—" : `${report.score} / 100`,
     findings: Object.values(counts).reduce((count, value) => count + value, 0),

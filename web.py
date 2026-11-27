@@ -28,7 +28,7 @@ from web_engine import analyze, upload_name
 from web_report import CRITERIA, agent_list
 from tempfile import TemporaryDirectory
 from core.advanced_report import generate_pdf, generate_quick_pdf
-from orchestrator import DeepRunResult, QuickRunResult  # noqa: E402
+from orchestrator import DeepPartialRunResult, DeepRunResult, QuickRunResult  # noqa: E402
 
 from analyzer import (  # noqa: E402
     build_rules_report,
@@ -315,9 +315,9 @@ def _live_error(exc, language):
         return 502, {"ru": "Gemini отклонил запрос. Проверьте ключ и доступ.",
                      "en": "Gemini rejected the request. Check its key and access.",
                      "kk": "Gemini сұрауды қабылдамады. Кілт пен рұқсатты тексеріңіз."}[language]
-    return 502, {"ru": "LangGraph не завершил проверку. Проверьте доступность Gemini и повторите запрос.",
-                 "en": "LangGraph could not complete the run. Check Gemini availability and retry.",
-                 "kk": "LangGraph тексеруді аяқтай алмады. Gemini қолжетімділігін тексеріңіз."}[language]
+    return 502, {"ru": "Не удалось завершить проверку. Повторите запуск или проверьте журнал сервера.",
+                 "en": "The review did not complete. Retry or check the server log.",
+                 "kk": "Тексеру аяқталмады. Қайталап көріңіз немесе сервер журналын қараңыз."}[language]
 
 
 @app.post("/api/audit")
@@ -328,6 +328,7 @@ async def audit_live(
     extra_context: str = Form(default=""),
     consent: bool = Form(default=False),
     cache: bool = Form(default=False),
+    retry_token: str | None = Form(default=None, max_length=64),
     language: Language = Form(default="ru"),
     file: UploadFile | None = File(default=None),
     files: list[UploadFile] | None = File(default=None),
@@ -344,6 +345,8 @@ async def audit_live(
     context = extra_context.strip()
     if cache and context:
         raise HTTPException(400, "Persistent caching is unavailable with extra context.")
+    if retry_token and (mode != "deep" or cache):
+        raise HTTPException(400, "An in-memory Auditor retry requires Deep mode without disk caching.")
     items = await _live_inputs(text, package, file, files, roles)
     loop = asyncio.get_running_loop()
     queue = asyncio.Queue()
@@ -355,7 +358,7 @@ async def audit_live(
         async with request.app.state.llm_slots:
             started = True
             return await run_in_threadpool(analyze, items, request.app.state.settings, language, mode,
-                                           context, MAX_SPEC_CHARS, emit, use_cache=cache)
+                                           context, MAX_SPEC_CHARS, emit, use_cache=cache, retry_token=retry_token)
 
     if not request.url.path.endswith("/stream"):
         try:
@@ -512,7 +515,7 @@ async def ask_document(
 
 
 @app.post("/api/audit/pdf")
-async def download_pdf(result: DeepRunResult | QuickRunResult):
+async def download_pdf(result: DeepRunResult | DeepPartialRunResult | QuickRunResult):
     def render():
         with TemporaryDirectory(prefix="requiragents-pdf-") as folder:
             path = Path(folder) / "report.pdf"
