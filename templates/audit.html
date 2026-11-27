@@ -7,6 +7,7 @@
       <button type="button" class="btn-ghost hidden" id="demo-btn" data-msg="seeExample">Смотреть пример</button>
     </div>
   </div>
+  <div class="audit-workspace">
   <div class="audit-flow" id="audit-flow" data-stage="upload">
     <p id="form-error" class="error-text flow-error hidden" role="alert"></p>
     <div class="audit-setup">
@@ -280,5 +281,19 @@
         </div>
       </div>
     </section>
+  </div>
+  <aside class="scene-panel hidden" id="scene-panel" aria-labelledby="scene-panel-title">
+    <div class="scene-toolbar">
+      <h2 id="scene-panel-title" data-msg="sceneWorkspace">Рабочая сцена</h2>
+      <div class="scene-controls">
+        <select id="scene-inspect" data-label="sceneInspect" aria-label="Выбрать агента"></select>
+        <button type="button" class="btn-mini" id="scene-camera-reset" data-msg="sceneCameraReset">Сбросить вид</button>
+        <button type="button" class="btn-mini" data-scene-zoom="-1" data-label="sceneZoomOut" aria-label="Уменьшить">−</button>
+        <button type="button" class="btn-mini" data-scene-zoom="1" data-label="sceneZoomIn" aria-label="Увеличить">+</button>
+      </div>
+    </div>
+    <div id="scene-viewport" class="scene-viewport"></div>
+    <p class="scene-inspection" id="scene-inspection" aria-live="polite"></p>
+  </aside>
   </div>
 </main>

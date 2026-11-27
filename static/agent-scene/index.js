@@ -40,7 +40,8 @@ class AgentScene {
     this.time = 0;
     this.pointer = null;
     this.pointerDirty = false;
-    this.backgroundCache = new WeakMap();
+    this.selectedAgent = null;
+    this.zoom = 1;
   }
 
   get animated() {
@@ -48,6 +49,9 @@ class AgentScene {
   }
 
   init() {
+    this.viewport = document.getElementById("scene-viewport");
+    this.panel = document.getElementById("scene-panel");
+    if (!this.viewport || !this.panel) return false;
     const canvas = document.createElement("canvas");
     canvas.className = "agent-scene-canvas";
     canvas.setAttribute("aria-hidden", "true");
@@ -58,11 +62,12 @@ class AgentScene {
       return false; // Без WebGL сайт просто работает без сцены.
     }
     this.renderer = renderer;
+    this.panel.classList.remove("hidden");
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.75));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.setClearColor(0x000000, 0);
-    document.body.prepend(canvas);
+    this.viewport.append(canvas);
     this.canvas = canvas;
 
     const p = this.palette = readPalette();
@@ -98,7 +103,7 @@ class AgentScene {
     this.apartment = buildApartment(p);
     scene.add(this.office.root, this.apartment.root);
 
-    this.overlay = new Overlay();
+    this.overlay = new Overlay(this.viewport);
     const ctx = {
       palette: p, scene, office: this.office, apartment: this.apartment, overlay: this.overlay,
       t: text, setState: (state) => this.setState(state),
@@ -158,7 +163,7 @@ class AgentScene {
   bindPreview() {
     const open = document.getElementById("scene-preview");
     const close = document.getElementById("scene-preview-close");
-    const workspace = document.getElementById("workspace");
+    const workspace = document.getElementById("audit-flow");
     if (!open || !close || !workspace) return;
     open.classList.remove("hidden");
     const setPreview = (visible) => {
@@ -177,13 +182,43 @@ class AgentScene {
   bind() {
     this.bindPreview();
     window.addEventListener("agentscene", (event) => this.onEvent(event.detail || {}));
-    window.addEventListener("resize", () => { this.resize(); this.renderIfStatic(); });
+    this.resizeObserver = new ResizeObserver(() => { this.resize(); this.updateLoop(); this.renderIfStatic(); });
+    this.resizeObserver.observe(this.viewport);
     document.addEventListener("visibilitychange", () => this.updateLoop());
-    window.addEventListener("pointermove", (event) => {
+    this.viewport.addEventListener("pointermove", (event) => {
+      if (event.pointerType === "touch") return;
       this.pointer = { x: event.clientX, y: event.clientY };
       this.pointerDirty = true;
+      if (!this.running) this.updateHover();
     }, { passive: true });
-    document.documentElement.addEventListener("pointerleave", () => { this.pointer = null; this.pointerDirty = true; });
+    this.viewport.addEventListener("pointerleave", () => {
+      this.pointer = null;
+      this.pointerDirty = true;
+      if (!this.running) this.updateHover();
+    });
+    this.viewport.addEventListener("click", (event) => {
+      this.selectedAgent = this.hitAgent(event.clientX, event.clientY)?.key || null;
+      this.inspect.value = this.selectedAgent || "";
+      this.selectAgent(this.selectedAgent);
+      this.renderIfStatic();
+    });
+    this.inspect = document.getElementById("scene-inspect");
+    this.inspect.addEventListener("change", () => {
+      this.selectedAgent = this.inspect.value || null;
+      this.selectAgent(this.selectedAgent);
+      this.renderIfStatic();
+    });
+    document.getElementById("scene-camera-reset").addEventListener("click", () => {
+      this.zoom = 1;
+      this.resize();
+      this.renderIfStatic();
+    });
+    this.panel.querySelectorAll("[data-scene-zoom]").forEach((button) => button.addEventListener("click", () => {
+      this.zoom = Math.max(0.85, Math.min(1.5, this.zoom + Number(button.dataset.sceneZoom) * 0.12));
+      this.resize();
+      this.renderIfStatic();
+    }));
+    this.refreshInspector();
     new MutationObserver((changes) => {
       if (changes.some((change) => change.attributeName === "data-depth")) this.updateLoop();
       if (changes.some((change) => change.attributeName === "lang")) this.refreshTexts();
@@ -252,6 +287,8 @@ class AgentScene {
     remember(mode);
     if (mode === this.mode) return;
     this.mode = mode;
+    this.selectedAgent = null;
+    this.refreshInspector();
     this.pipeline.reset();
     this.pipeline.end();
     this.quick.reset();
@@ -263,69 +300,81 @@ class AgentScene {
   }
 
   refreshTexts() {
+    this.refreshInspector();
     if (this.pipeline.active) this.pipeline.updateChip();
     if (this.hoveredAgentId) this.showHover(this.allActors.find((a) => a.key === this.hoveredAgentId));
     this.overlay.clearBubbles();
   }
 
+  refreshInspector() {
+    if (!this.inspect) return;
+    const actors = this.mode === "quick" ? [this.quick.actor] : this.deepActors;
+    const option = (name, value) => {
+      const node = document.createElement("option");
+      node.textContent = name;
+      node.value = value;
+      return node;
+    };
+    this.inspect.replaceChildren(option(text("sceneInspect"), ""), ...actors.map((actor) =>
+      option(text(actor.config.name) + " · " + text(actor.config.role), actor.key)));
+    this.inspect.value = this.selectedAgent || "";
+  }
+
   resize() {
-    const width = innerWidth, height = innerHeight;
+    const { clientWidth: width, clientHeight: height } = this.viewport;
+    if (!width || !height) return;
     this.width = width; this.height = height;
     this.renderer.setSize(width, height, false);
     const aspect = width / height;
-    // Комната целиком помещается в кадр и смещена вправо-вниз, чтобы не спорить с заголовками.
-    const narrow = aspect < 1;
-    const halfH = Math.max(narrow ? 6.6 : 6.4, (narrow ? 10.5 : 10.2) / aspect);
+    const halfH = Math.max(5.4, 8.7 / aspect) / this.zoom;
     const cam = this.camera;
     cam.left = -halfH * aspect; cam.right = halfH * aspect; cam.top = halfH; cam.bottom = -halfH;
-    const target = new THREE.Vector3(narrow ? -0.3 : -1.6, 0.2, narrow ? -0.3 : -1.6);
+    const target = new THREE.Vector3(0, .35, 0);
     this.cameraTarget = target;
     cam.position.copy(target).add(new THREE.Vector3(14, 12.5, 14));
     cam.lookAt(target);
     cam.updateProjectionMatrix();
   }
 
-  isBackground(x, y) {
-    const el = document.elementFromPoint(x, y);
-    if (!el) return false;
-    if (this.backgroundCache.has(el)) return this.backgroundCache.get(el);
-    let node = el;
-    let result = true;
-    while (node && node !== document.documentElement) {
-      if (node === document.body) break;
-      if (node.matches?.("a,button,input,select,textarea,label,summary,[role=dialog],[tabindex]:not(#route-scene)")) { result = false; break; }
-      const style = getComputedStyle(node);
-      const bg = style.backgroundColor;
-      if ((bg && bg !== "transparent" && !/rgba\(.*,\s*0\)$/.test(bg)) || style.backgroundImage !== "none") { result = false; break; }
-      if (node.childNodes && [...node.childNodes].some((child) => child.nodeType === 3 && child.textContent.trim())) { result = false; break; }
-      node = node.parentElement;
+  hitAgent(clientX, clientY) {
+    const rect = this.viewport.getBoundingClientRect();
+    const x = clientX - rect.left, y = clientY - rect.top;
+    if (!rect.width || !rect.height || x < 0 || x > rect.width || y < 0 || y > rect.height) return null;
+    const ndc = new THREE.Vector2(x / rect.width * 2 - 1, 1 - y / rect.height * 2);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const actors = this.allActors.filter((actor) => actor.root.visible && actor.root.scale.x > 0.6);
+    const found = this.raycaster.intersectObjects(actors.map((actor) => actor.root), true)
+      .find((item) => item.object.userData.actorKey && item.object.geometry.type !== "RingGeometry");
+    return actors.find((actor) => actor.key === found?.object.userData.actorKey);
+  }
+
+  selectAgent(key) {
+    const hit = this.allActors.find((actor) => actor.key === key);
+    this.allActors.forEach((actor) => actor.character.setHighlight(actor === hit ? 1 : 0));
+    this.hoveredAgentId = hit?.key || null;
+    if (hit) this.showHover(hit);
+    else {
+      this.overlay.hideCard();
+      document.getElementById("scene-inspection").textContent = "";
     }
-    this.backgroundCache.set(el, result);
-    return result;
   }
 
   updateHover() {
     if (!this.pointerDirty) return;
     this.pointerDirty = false;
-    let hit = null;
-    if (this.pointer && this.isBackground(this.pointer.x, this.pointer.y)) {
-      const ndc = new THREE.Vector2((this.pointer.x / this.width) * 2 - 1, -(this.pointer.y / this.height) * 2 + 1);
-      this.raycaster.setFromCamera(ndc, this.camera);
-      const visible = this.allActors.filter((actor) => actor.root.visible && actor.root.scale.x > 0.6).map((actor) => actor.root);
-      const found = this.raycaster.intersectObjects(visible, true).find((item) => item.object.userData.actorKey && item.object.geometry.type !== "RingGeometry");
-      if (found) hit = this.allActors.find((actor) => actor.key === found.object.userData.actorKey);
-    }
-    if ((hit?.key || null) === this.hoveredAgentId) return;
-    this.allActors.forEach((actor) => actor.character.setHighlight(actor === hit ? 1 : 0));
-    this.hoveredAgentId = hit?.key || null;
-    if (hit) this.showHover(hit); else this.overlay.hideCard();
+    const hit = this.pointer && this.hitAgent(this.pointer.x, this.pointer.y);
+    this.selectAgent(hit?.key || this.selectedAgent);
     this.renderIfStatic();
   }
 
   showHover(actor) {
     if (!actor) return;
     const role = this.pipeline.titles[actor.key] || text(actor.config.role);
-    this.overlay.showCard(actor, text(actor.config.name), role, text(actor.status));
+    const name = text(actor.config.name), status = text(actor.status);
+    this.overlay.showCard(actor, name, role, status);
+    const line = document.getElementById("scene-inspection");
+    const value = this.selectedAgent === actor.key ? [name, role, status].filter(Boolean).join(" · ") : "";
+    if (line.textContent !== value) line.textContent = value;
   }
 
   tick(dt) {
@@ -369,7 +418,7 @@ class AgentScene {
   }
 
   updateLoop() {
-    const shouldRun = this.animated && !document.hidden;
+    const shouldRun = this.animated && !document.hidden && this.viewport.clientWidth > 0;
     if (shouldRun && !this.running) {
       this.running = true;
       this.clock.start();
@@ -405,6 +454,7 @@ function boot() {
       window.removeEventListener("agentscene", early);
     }
   } catch (failure) {
+    scene.panel?.classList.add("hidden");
     console.warn("agent-scene disabled:", failure);
     document.querySelector(".agent-scene-canvas")?.remove();
   }

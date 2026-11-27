@@ -4,7 +4,7 @@ import { THREE } from "./kit.js";
 const MAX_BUBBLES = 2;
 
 export class Overlay {
-  constructor() {
+  constructor(viewport) {
     this.root = document.createElement("div");
     this.root.className = "agent-scene-overlay";
     this.root.setAttribute("aria-hidden", "true");
@@ -15,7 +15,7 @@ export class Overlay {
     this.cardStatus = this.node("span", "agent-scene-card-status", "", this.card);
     this.chip = this.node("div", "agent-scene-chip hidden");
     this.root.append(this.card);
-    document.body.append(this.root, this.chip);
+    viewport.append(this.root, this.chip);
     this.vector = new THREE.Vector3();
   }
 
@@ -62,11 +62,16 @@ export class Overlay {
       bubble.time -= dt;
       if (bubble.time <= 0 || !bubble.actor.root.visible || bubble.actor.root.scale.x < 0.5) { this.drop(bubble); continue; }
       const { x, y } = this.project(bubble.actor, camera, width, height);
-      bubble.el.style.setProperty("transform", `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(-50%, -100%)`);
+      const inset = 6;
+      const left = Math.max(inset, Math.min(width - bubble.el.offsetWidth - inset, x - bubble.el.offsetWidth / 2));
+      const top = Math.max(inset, Math.min(height - bubble.el.offsetHeight - inset, y - bubble.el.offsetHeight - 8));
+      bubble.el.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
     }
     if (this.hovered) {
       const { x, y } = this.project(this.hovered, camera, width, height);
-      this.card.style.setProperty("transform", `translate(${Math.round(x + 18)}px, ${Math.round(y - 8)}px)`);
+      const left = Math.max(6, Math.min(width - this.card.offsetWidth - 6, x + 18));
+      const top = Math.max(6, Math.min(height - this.card.offsetHeight - 6, y - 8));
+      this.card.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
     }
   }
 

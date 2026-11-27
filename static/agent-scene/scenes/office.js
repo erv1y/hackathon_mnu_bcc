@@ -104,7 +104,7 @@ export function buildOffice(p) {
     ["h0", "h1"], ["h0", "fax"], ["h1", "h2"], ["h2", "h3"], ["h3", "door"], ["door", "l0"], ["l0", "l1"],
     ["h1", "payments_side"], ["h2", "kyc_aml_side"], ["h2", "assembler_side"], ["h2", "tray"], ["h1", "tray"],
     ["h3", "security_side"], ["h3", "logic_side"],
-    ["l0", "board"], ["l1", "coffee"], ["board", "coffee"], ["l0", "chatA"], ["l1", "chatB"], ["chatA", "chatB"],
+    ["l0", "board"], ["l1", "coffee"], ["board", "coffee"], ["l0", "chatA"], ["l1", "chatB"],
   ]);
 
   const spots = {
