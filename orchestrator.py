@@ -57,7 +57,7 @@ class DeepPartialRunResult(QuickValidationResult):
     execution_time_seconds: float
     independent_audit: Literal[False] = False
     finding_audit: AuditPatch | None = None
-    auditor_failure: Literal["auditor_validation_failed", "auditor_provider_failed", "consistency_incomplete"]
+    auditor_failure: Literal["auditor_validation_failed", "auditor_provider_failed", "consistency_incomplete", "source_coverage_incomplete"]
 
 
 class ValidationState(TypedDict, total=False):

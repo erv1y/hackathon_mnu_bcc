@@ -35,6 +35,8 @@ def generate_quick_pdf(result, output_path, *, executive=False):
                   else 'Аудитор не получил пригодного ответа от Gemini.')
         if partial == "consistency_incomplete":
             reason = "Проверка согласованности завершена частично."
+        if partial == "source_coverage_incomplete":
+            reason = "Часть исходного документа не прочитана."
         add(label(reason) + ' ' + label('Независимый аудит не завершён. Готовность не оценена.'))
     else:
         add(label('Quick Validation — предварительный отчёт'), heading)
@@ -43,8 +45,18 @@ def generate_quick_pdf(result, output_path, *, executive=False):
     finding_audit = getattr(result, "finding_audit", None)
     if finding_audit is not None:
         add(label("Независимо проверенные замечания при неполном покрытии"), heading)
-        add(label("Незавершённые этапы проверки согласованности") + ": " + ", ".join(
-            sorted({entry["phase"] for entry in result.consistency.unresolved})))
+        if result.consistency.unresolved:
+            add(label("Незавершённые этапы проверки согласованности") + ": " + ", ".join(
+                sorted({entry["phase"] for entry in result.consistency.unresolved})))
+        for warning in getattr(result, "passport", {}).get("source_warnings", []):
+            add(warning)
+        critical = sum(decision.decision in ("confirmed", "revised") and decision.final_severity == "critical"
+                       and decision.assessment_kind == "defect" and not decision.finding_id.startswith("REVIEW-")
+                       for decision in finding_audit.decisions)
+        add(f"{label('Критические замечания')} · {critical}")
+        if counts := getattr(result, "passport", {}).get("product_counts"):
+            add(f"{label('Исходные замечания')} · {counts['raw']}")
+            add(f"{label('Группы замечаний')} · {counts['grouped']}")
         for decision in finding_audit.decisions:
             add(f"{decision.finding_id} | {decision.decision} | {decision.title}")
             if decision.merged_into:

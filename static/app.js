@@ -502,6 +502,7 @@ function renderProgress(agents) {
 }
 
 function auditorFailureKey(code) {
+  if (code === "source_coverage_incomplete") return "coverageLimited";
   if (code === "consistency_incomplete") return "consistencyIncomplete";
   return code === "auditor_validation_failed" ? "auditorValidationFailed" : "auditorProviderFailed";
 }
@@ -708,6 +709,9 @@ function renderReport() {
   $("score-val").textContent = counts.score;
   $("score-status").textContent = msg(local ? "ruleScoreNote" : quick && status === "clearStatus" ? "noQuickCritical" : extraRisks && status === "clearStatus" ? "reviewStatus" : status);
   $("high-val").textContent = counts.high;
+  $("critical-val").textContent = audit.counts?.Critical || 0;
+  $("group-count").textContent = audit.grouped_issue_count === undefined ? "" :
+    msg("groupCounts", { raw: audit.raw_finding_count, groups: audit.grouped_issue_count });
   $("total-val").textContent = counts.findings;
   $("requirements-val").textContent = counts.requirements;
   const totalFiles = audit.document.files?.length;
@@ -756,13 +760,14 @@ function renderReport() {
 
 function readinessText(report) {
   if (report.auditor_failure) return msg("auditPartialStatus");
+  if (report.native && report.partial) return msg("coverageLimited");
   const keys = {ready: "readyState", conditionally_ready: "conditionalState", not_ready: "blockedState"};
   return report.native ? msg(keys[report.readiness] || "preliminaryState") : "—";
 }
 
 function renderNativeTrace(audit) {
   show($("native-status"), Boolean(audit.native),
-    `${readinessText(audit)} · ${audit.elapsed_sec} s · ${audit.native?.passport.run_kind || ""}`);
+    `${readinessText(audit)} · ${audit.elapsed_sec} s · ${({new: msg("runNew"), resume: msg("runResume"), cache_hit: msg("cachedRun")}[audit.native?.passport.run_kind] || "")}`);
   show($("executive-pdf-btn"), Boolean(audit.native && (audit.independent_audit || audit.finding_audit_completed)));
   show($("native-pdf-btn"), Boolean(audit.native));
   const decisionKeys = {confirmed: "auditConfirmed", revised: "auditRevised", merged: "auditMerged", rejected: "auditRejected"};
@@ -938,7 +943,6 @@ function renderFindings() {
   const module = state.audit.modules.find((item) => item.key === state.agent);
   if (module && !module.ok) {
     list.append(element("p", "defect-card error-card", module.error));
-    return;
   }
   for (const group of groups(reviewed)) {
     const panel = element("section", "finding-group");
@@ -992,6 +996,11 @@ function makeCard(defect) {
     element("h5", "", defect.title));
   if (state.comparison?.result?.new.includes(defect.id)) header.append(element("span", "badge finding-new", msg("newFinding")));
   card.append(header);
+  const issueGroup = state.audit.issue_groups?.find((group) => group.members.some((member) => member.id === defect.id));
+  if (issueGroup?.members.length > 1) {
+    const ids = issueGroup.members.map((member) => member.id);
+    card.append(element("p", "hint", msg("groupMembers") + " · " + ids.join(", ")));
+  }
   if (Number.isFinite(defect.confidence)) {
     card.append(element("p", "hint", `${msg("modelConfidence")} · ${Math.round(defect.confidence * 100)}%`));
   }
@@ -1015,7 +1024,7 @@ function makeCard(defect) {
       card.append(fix);
     }
     if (field === "criterion" && defect.criterion) {
-      details.append(labelled(`${msg("rule")}.`, `${defect.criterion.title} · ${defect.criterion.id}`, ""));
+      details.append(labelled(`${msg("rule")}.`, Object.hasOwn(UI_TEXT, "criterion_" + defect.criterion.id) ? msg("criterion_" + defect.criterion.id) : defect.criterion.title, ""));
       if (state.audit.mode !== "rules" && !state.audit.native) details.append(element("p", "", msg("penalty", { n: defect.score_points })));
     }
     if (field === "contributors") {

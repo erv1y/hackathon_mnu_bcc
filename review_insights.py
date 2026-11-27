@@ -2,6 +2,7 @@
 
 import re
 from collections import defaultdict
+from product_review import boundary_inputs, grounded_options, group_findings
 from decimal import Decimal
 
 from audit_documents import DocumentBundle
@@ -215,22 +216,24 @@ def insight_criteria(profile: AuditProfile, mode: CheckMode) -> list[str]:
 
 
 def build_insights(bundle: DocumentBundle, findings: list[dict], profile: AuditProfile,
-                   mode: CheckMode, language: Language) -> dict:
+                   mode: CheckMode, language: Language, *, requirements=()) -> dict:
     plan = profile.check_plan(mode)
     copy = _COPY[language]
     ambiguities = ambiguity_findings(bundle, profile, language) if plan.ambiguities else []
     sanity = feasibility_findings(bundle, language, cross_file=mode == "deep") if plan.feasibility else []
     verified = sorted(
-        (item for item in findings if not item.get("review_reason")),
+        (group[0] for group in group_findings(findings) if not group[0].get("review_reason")),
         key=lambda item: (SEV_RANK[item["severity"]], item["id"]),
     )
     questions = [
         {
             "finding_id": item["id"], "severity": item["severity"], "title": item["title"],
-            "question": item.get("clarification") or copy["question"].format(title=item["title"]),
-            "default": item["suggestion"], "evidence": item["evidence"],
+            "question": copy["question"].format(title=item["title"]),
+            "reason": item["issue"], "default": item["suggestion"], "evidence": item["evidence"],
+            "requirement_ids": item.get("requirement_ids", []), "role": "processOwner",
+            "options": grounded_options(item["evidence"]) if item.get("action_kind") == "business_decision" else [],
         }
-        for item in verified if item.get("fix", {}).get("kind", "clarify") == "clarify"
+        for item in verified if item.get("fix", {}).get("kind", "clarify") in {"clarify", "business_decision"}
     ]
     questions.extend({**row, "finding_id": None, "example": row["id"].startswith("A-")} for row in [*sanity, *ambiguities])
     questions.sort(key=lambda item: SEV_RANK[item["severity"]])
@@ -243,13 +246,75 @@ def build_insights(bundle: DocumentBundle, findings: list[dict], profile: AuditP
             continue
         kind = _CASE_BY_RULE.get(item["criterion_id"], "test")
         condition, check, expected = _SCENARIO_COPY[kind][language]
+        evidence = item["evidence"]
+        alternatives = grounded_options(evidence)
+        conditional = bool(alternatives or item.get("action_kind") == "business_decision"
+                           or item["criterion_id"] in {
+                               "correctness", "contradiction", "inconsistent_constraint", "scope_conflict",
+                               "missing_requirement", "missing_dependency", "unambiguity", "clarity",
+                               "completeness", "verifiability", "feasibility",
+                           })
+        inputs = boundary_inputs(alternatives)
+        if item.get("requirement_ids"):
+            quote_text = " ".join(proof["text"] for proof in evidence)
+            if re.search(r"\b(?:unauthori[sz]ed|authentication|access|доступ\w*|авторизац\w*|рұқсат\w*)\b",
+                         quote_text, re.IGNORECASE):
+                kind = "security"
+            elif re.search(r"\b(?:status|state|статус\w*|состояни\w*|мәртебе\w*)\b", quote_text, re.IGNORECASE):
+                kind = "transition"
+            elif conditional and not inputs:
+                kind = "negative"
+            condition = "\n".join(proof["text"] for proof in evidence)
+            check = {
+                "en": "Exercise the scenario described in the cited requirement and record the observed outcome.",
+                "ru": "Выполните сценарий из процитированного требования и зафиксируйте фактический результат.",
+                "kk": "Дәйексөздегі талаптың сценарийін орындап, нақты нәтижені тіркеңіз.",
+            }[language]
+            if kind == "security":
+                check = {
+                    "en": "Exercise the cited operation with the permitted and restricted roles described in the evidence.",
+                    "ru": "Выполните операцию для разрешённой и ограниченной ролей, указанных в цитатах.",
+                    "kk": "Дәйексөздегі рұқсат етілген және шектелген рөлдермен әрекетті орындаңыз.",
+                }[language]
+            elif kind == "transition":
+                check = {
+                    "en": "Trigger the quoted event and inspect the resulting status and whether the operation was applied once.",
+                    "ru": "Вызовите указанное событие, проверьте итоговый статус и число обработок операции.",
+                    "kk": "Көрсетілген оқиғаны іске қосып, соңғы мәртебені және орындалу санын тексеріңіз.",
+                }[language]
+            if conditional:
+                expected = (item.get("suggestion") or item.get("default") or expected)
+                if alternatives:
+                    expected = {
+                        "en": "Approval required. Compare the outcomes under each quoted rule at every listed input.",
+                        "ru": "Требуется решение. Сопоставьте результаты по каждому процитированному правилу на всех указанных входах.",
+                        "kk": "Мақұлдау қажет. Әр кіріс үшін дәйексөздегі әр ереже бойынша нәтижелерді салыстырыңыз.",
+                    }[language]
+            else:
+                expected = condition
         scenarios.append({
             "id": f"T-{len(scenarios) + 1:03d}", "finding_id": item["id"], "title": item["title"],
             "severity": item["severity"], "evidence": item["evidence"],
             "condition": condition, "check": check, "expected": expected,
+            "requirement_ids": item.get("requirement_ids", []), "inputs": inputs,
+            "approval": "clarification" if conditional else "pending",
+            "type": "boundary" if inputs else kind,
         })
-    critical_count = sum(row["severity"] == "High" for row in [*verified, *sanity])
-    suggestions = [item["suggestion"] for item in verified] + [item["default"] for item in sanity]
+    for req in requirements:
+        if req.get("finding_ids") or not req.get("file_id") or req.get("status") != "clear":
+            continue
+        scenarios.append({
+            "id": f"T-{len(scenarios) + 1:03d}", "finding_id": None,
+            "title": f"{req['id']} · {req['text'][:100]}", "severity": "Low",
+            "evidence": [req], "requirement_ids": [req["id"]], "inputs": [],
+            "condition": req["text"], "approval": "pending", "type": "positive",
+            "check": {"en": "Perform the action under the conditions in the requirement.",
+                      "ru": "Выполните действие в условиях, заданных в требовании.",
+                      "kk": "Талаптағы шарттарда әрекетті орындаңыз."}[language],
+            "expected": req["text"],
+        })
+    critical_count = sum(row["severity"] == "Critical" for row in [*verified, *sanity])
+    suggestions = list(dict.fromkeys([item["suggestion"] for item in verified] + [item["default"] for item in sanity]))
     return {
         "ambiguities": ambiguities, "sanity": sanity, "questions": questions, "scenarios": scenarios,
         "summaries": {

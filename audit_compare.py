@@ -34,6 +34,7 @@ class ReportDigest(DataModel):
     source_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     profile_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     partial: bool = False
+    independent_audit: bool | None = None
     minimum_severity: Severity = "Low"
     completed_criteria: list[str] = Field(default_factory=list, max_length=160)
     findings: list[FindingDigest] = Field(max_length=240)
@@ -82,7 +83,7 @@ def _match(left: FindingDigest, right: FindingDigest) -> float:
         same_files += name_matches
         used.add(index)
     weakest = min(proofs)
-    if weakest >= .98 or (weakest >= .74 and title >= .65):
+    if weakest >= .74 and title >= .65:
         return .75 * weakest + .25 * title + .01 * same_files / len(proofs)
     return 0.0
 
@@ -114,7 +115,7 @@ def compare_reports(before: ReportDigest, after: ReportDigest,
     sources_verified = bool(actual_hash and after.source_hash == actual_hash)
     indexes = [(item.role, QuoteIndex(item.text)) for item in sources] if sources_verified else []
     assessed = set(after.completed_criteria)
-    result = {"unchanged": [], "new": [], "closed": [], "unassessed": []}
+    result = {"unchanged": [], "new": [], "closed": [], "unassessed": [], "resolution_candidates": []}
     for i, item in enumerate(before.findings):
         if i in pairs:
             result["unchanged"].append({"before": item.id, "after": after.findings[pairs[i]].id})
@@ -124,10 +125,20 @@ def compare_reports(before: ReportDigest, after: ReportDigest,
             for point in item.evidence
         )
         can_close = (
-            bool(before.source_hash) and sources_verified and same_run_type and same_profile and not same_source
-            and bool(item.evidence) and not after.partial and not evidence_remains and item.criterion_id in assessed
+            bool(before.source_hash) and sources_verified and same_run_type and same_profile and not same_source and before.mode == after.mode
+            and bool(item.evidence) and not before.partial and not after.partial and after.independent_audit is not False and not evidence_remains and item.criterion_id in assessed
             and SEV_RANK[item.severity] <= SEV_RANK[after.minimum_severity]
         )
-        result["closed" if can_close else "unassessed"].append(item.id)
+        if can_close and after.independent_audit:
+            result["resolution_candidates"].append(item.id)
+        result["closed" if can_close and after.independent_audit is None else "unassessed"].append(item.id)
     result["new"] = [item.id for j, item in enumerate(after.findings) if j not in used]
-    return {"kind": "same_source" if same_source else "revision", **result}
+    analysis_kind = ("mode_comparison" if before.mode != after.mode else "repeat_analysis") if same_source else (
+        "revision" if before.source_hash and after.source_hash else "unknown")
+    return {"kind": "same_source" if same_source else "revision", "analysis_kind": analysis_kind,
+            "coverage_limited": before.partial or after.partial or after.independent_audit is False,
+            "severity_changed": [
+                {"before": before.findings[i].id, "after": after.findings[j].id,
+                 "from": before.findings[i].severity, "to": after.findings[j].severity}
+                for i, j in pairs.items() if before.findings[i].severity != after.findings[j].severity
+            ], **result}

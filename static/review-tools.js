@@ -4,13 +4,13 @@ const REVIEW_PAGE_SIZE = 12;
 const REVIEW_PRIORITY = { Critical: "P0", High: "P0", Medium: "P1", Low: "P2" };
 const REVIEW_STATUS = { risk: "reqRisk", review: "reqReview", partial: "reqPartial", clear: "reqClear" };
 const reviewState = {
-  tab: "report", page: 0, decisions: new Map(), activeFix: null, activeQuestion: null, answer: null, revisedDocuments: [],
+  tab: "report", page: 0, decisions: new Map(), activeFix: null, activeQuestion: null, answer: null, revisedDocuments: [], clarifications: new Map(), conversation: [], approvedScenarios: new Set(),
 };
 
 function resetReviewTools() {
   reviewState.activeQuestion?.abort();
   Object.assign(reviewState, {
-    tab: "report", page: 0, decisions: new Map(), activeFix: null, activeQuestion: null, answer: null, revisedDocuments: [],
+    tab: "report", page: 0, decisions: new Map(), activeFix: null, activeQuestion: null, answer: null, revisedDocuments: [], clarifications: new Map(), conversation: [], approvedScenarios: new Set(),
   });
   $("question-input").value = "";
   delete $("results").dataset.panelDirection;
@@ -69,7 +69,8 @@ function openFinding(id) {
 }
 
 function openFix(id) {
-  reviewState.activeFix = id;
+  const group = state.audit.issue_groups?.find((candidate) => candidate.members.some((member) => member.id === id));
+  reviewState.activeFix = group?.representative || id;
   openReviewTab("fixes");
   focusReviewCard("active-fix");
 }
@@ -218,7 +219,10 @@ function draftEdits(rows) {
   const edits = [];
   for (const row of rows) {
     const decision = reviewState.decisions.get(row.id);
-    if (row.fix.kind === "replace" && decision?.status === "accepted") {
+    if (decision?.status !== "accepted") continue;
+    if (decision.edits) {
+      edits.push(...decision.edits.map((edit) => ({ ...edit, id: row.id })));
+    } else if (row.fix.kind === "replace") {
       edits.push({ ...row.fix, id: row.id, replacement: decision.replacement });
     }
   }
@@ -231,6 +235,63 @@ function reviewDecision(row, status, text) {
   focusReviewCard("active-fix");
 }
 
+function renderConflictEditor(card, row, edits, targets) {
+  const existing = reviewState.decisions.get(row.id);
+  const values = conflictValues(targets);
+  const approved = [...reviewState.clarifications.values()].find((item) =>
+    item.findingId === row.id && item.status === "approved");
+  const fields = [];
+  const pairs = element("div", "fix-comparison");
+  const group = element("div", "actions");
+  const fill = (value) => {
+    if (!values.length || !/^\d+(?:[ ,\u00a0]\d{3})*(?:[.,]\d+)?$/u.test(value)) return;
+    targets.forEach((target, index) => {
+      fields[index].value = target.original.replace(reviewNumbers, () => value);
+    });
+  };
+  for (const value of values) group.append(button("btn-secondary", value, () => fill(value)));
+  if (values.length) {
+    const amount = element("input");
+    amount.type = "text";
+    amount.setAttribute("aria-label", msg("customDecision"));
+    amount.placeholder = msg("customDecision");
+    group.append(amount, button("btn-secondary", msg("previewDecision"), () => fill(amount.value.trim())));
+  }
+  targets.forEach((target) => {
+    const entry = element("label", "fix-wording");
+    const input = element("textarea");
+    input.rows = 3;
+    input.maxLength = 2200;
+    input.value = existing?.edits?.find((edit) => edit.requirementId === target.requirementId)?.replacement || target.original;
+    fields.push(input);
+    entry.append(element("strong", "", target.requirementId), element("blockquote", "", target.original), input);
+    pairs.append(entry);
+  });
+  if (approved) {
+    card.append(labelled(msg("clarificationApproved"), approved.answer, "hint"));
+    if (values.length) group.append(button("btn-secondary", msg("useApprovedAnswer"), () => fill(approved.answer)));
+  }
+  const confirmation = element("input");
+  confirmation.type = "checkbox";
+  const label = element("label", "hint");
+  label.append(confirmation, document.createTextNode(" " + msg("confirmBusinessDecision")));
+  const message = element("p", "hint");
+  const accept = button("btn-primary", msg("acceptFix"), () => {
+    const accepted = approvedConflictEdits(targets, fields.map((input) => input.value),
+      edits.filter((edit) => edit.id !== row.id), confirmation.checked);
+    if (!accepted || !validDraftEdits(state.audit.document.text, accepted, state.audit.document.files)) {
+      message.textContent = msg("invalidDecisionEdit");
+      return;
+    }
+    reviewState.decisions.set(row.id, {status: "accepted", edits: accepted});
+    renderFixes();
+    focusReviewCard("revised-draft");
+  });
+  accept.disabled = true;
+  confirmation.addEventListener("change", () => { accept.disabled = !confirmation.checked; });
+  card.append(group, pairs, label, accept, message);
+}
+
 function renderFixDetail(row, edits) {
   const target = $("active-fix");
   target.replaceChildren();
@@ -240,7 +301,12 @@ function renderFixDetail(row, edits) {
   title.append(element("h3", "", row.title), element("span", `badge ${row.severity}`, levelName(row.severity)));
   card.append(title, element("p", "hint", row.issue));
   const controls = element("div", "actions fix-actions");
-  if (row.fix.kind === "replace") {
+  const sourceIds = Object.fromEntries(state.audit.document.requirements.map((item) => [item.id, item.source_id]));
+  const targets = conflictTargets({ ...row, sourceIds }, state.audit.document.text);
+  if (targets.length) {
+    renderConflictEditor(card, row, edits, targets);
+    card.append(makeEvidence(row));
+  } else if (row.fix.kind === "replace") {
     const replacement = reviewState.decisions.get(row.id)?.replacement || row.fix.replacement;
     const pair = element("div", "fix-comparison");
     for (const [label, text] of [["fixOriginal", row.fix.original], ["fixReplacement", replacement]]) {
@@ -281,6 +347,10 @@ function renderFixDetail(row, edits) {
     card.append(labelled(msg("clarificationNeeded"), row.fix.question || row.suggestion, "fix-wording"));
     card.append(makeEvidence(row));
   }
+  if (reviewState.decisions.has(row.id)) controls.append(button("btn-secondary", msg("undoDecision"), () => {
+    reviewState.decisions.delete(row.id);
+    renderFixes();
+  }));
   controls.append(button("btn-secondary", msg("rejectFix"), () => reviewDecision(row, "rejected")));
   if (row.verified === "exact") {
     controls.append(button("btn-secondary", msg("explainFix"), () => {
@@ -313,7 +383,7 @@ function renderVersionHistory() {
 }
 
 function renderFixes() {
-  const rows = findings(true).filter((item) => !item.review_reason && item.fix).sort(sortedBySeverity);
+  const rows = comparableFindings(state.audit).filter((item) => !item.review_reason && item.fix).sort(sortedBySeverity);
   const edits = draftEdits(rows);
   const active = rows.find((row) => row.id === reviewState.activeFix) || rows[0];
   const list = $("fixes-list");
@@ -327,18 +397,23 @@ function renderFixes() {
   }
   if (!rows.length) list.replaceChildren(element("p", "hint", msg("noDraftEdits")));
   renderFixDetail(active, edits);
-  show($("revised-draft"), edits.length > 0);
+  const draftValid = validDraftEdits(state.audit.document.text, edits, state.audit.document.files);
+  reviewState.revisedDocuments = [];
+  show($("revised-draft"), edits.length > 0 && draftValid);
+  if (!draftValid) list.append(element("p", "warning-box", msg("draftConflict")));
   show($("audit-revised"), Boolean(state.config?.api_key_configured && state.audit.mode === "live" && !state.audit.source_warnings.length));
-  if (edits.length) renderDocumentComparison(state.audit.document.text, edits);
+  if (edits.length && draftValid) renderDocumentComparison(state.audit.document.text, edits);
   renderVersionHistory();
 }
 
 function questionPayload(intent, question, focusId) {
   const { audit, demoVersion } = state;
-  const payload = { intent, question, language: audit.language, mode: reportMode(audit) };
+  const previous = reviewState.conversation.filter((turn) => turn.question).at(-1);
+  const payload = { intent, question, language: audit.language, mode: reportMode(audit),
+    previous_question: intent === "free" ? previous?.question || "" : "" };
   if (focusId) payload.focus_id = focusId;
   if (audit.mode === "replay") return { ...payload, demo_version: demoVersion };
-  const rows = findings(true).filter((row) =>
+  const rows = (focusId ? findings(true) : comparableFindings(audit)).filter((row) =>
     !row.review_reason && row.verified === "exact" && row.evidence.length && row.evidence.length <= 12 && row.evidence.every((quote) => Array.from(quote.text).length >= 8 && Array.from(quote.text).length <= 1200)
   ).sort((a, b) => Number(b.id === focusId) - Number(a.id === focusId) || sortedBySeverity(a, b)).slice(0, 48);
   const hasFiles = Boolean(audit.document.files?.length);
@@ -364,7 +439,11 @@ async function askReviewQuestion(intent, question = "", focusId = "") {
       headers: { ...authHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify(questionPayload(intent, question, focusId)),
     });
-    if (reviewState.activeQuestion === controller) reviewState.answer = { intent, items: result.items };
+    if (reviewState.activeQuestion === controller) {
+      reviewState.answer = { intent, items: result.items, question };
+      if (question) reviewState.conversation = [...reviewState.conversation, reviewState.answer].slice(-8);
+      $("question-input").value = "";
+    }
   } catch (_) {
     if (reviewState.activeQuestion === controller) reviewState.answer = { error: true };
   } finally {
@@ -380,33 +459,34 @@ function renderQuestionAnswer() {
   target.replaceChildren();
   $("question-send").disabled = Boolean(reviewState.activeQuestion);
   if (reviewState.activeQuestion) target.append(element("p", "hint", msg("questionLoading")));
-  const answer = reviewState.answer;
-  if (!answer) return;
-  if (answer.error) {
-    target.append(element("p", "warning-box", msg("questionFailed")));
-    return;
-  }
-  if (answer.intent === "score") {
-    target.append(element("p", "review-panel", scoreExplanation(state.audit)));
-  } else if (!answer.items.length) {
-    target.append(element("p", "hint", msg("questionEmpty")));
-  }
-  for (const item of answer.items) {
+  if (state.audit.partial) target.append(element("p", "hint", msg("compareLimited")));
+  const turns = [...reviewState.conversation];
+  if (reviewState.answer && turns.at(-1) !== reviewState.answer) turns.push(reviewState.answer);
+  for (const answer of turns) {
+    if (answer.question) target.append(element("h4", "", answer.question));
+    if (answer.error) {
+      target.append(element("p", "warning-box", msg("questionFailed")));
+      continue;
+    }
+    if (answer.intent === "score") target.append(element("p", "review-panel", scoreExplanation(state.audit)));
+    if (answer.intent !== "score" && !answer.items.length) target.append(element("p", "hint", msg("questionEmpty")));
     const card = element("article", "review-panel");
+    if (answer.items.length) target.append(card);
+    for (const item of answer.items) {
     const isFinding = item.kind === "finding";
-    card.append(element("p", "hint", msg(isFinding ? "findingSources" : "matchingSource")));
-    if (item.title) card.append(element("h3", "", item.title));
+    card.append(element("p", "hint", msg(isFinding ? "findingSources" : "factsSources")));
+    if (item.title) card.append(element("h4", "", item.title));
     if (isFinding) {
       if (answer.intent === "clarify") card.append(element("p", "", item.clarification));
       else {
         card.append(element("p", "", item.issue));
-        if (answer.intent !== "impact") card.append(element("p", "hint", item.suggestion));
+        if (answer.intent !== "impact") card.append(labelled(msg("proposedDefault"), item.suggestion, "hint"));
       }
     }
     card.append(makeEvidence({ evidence: item.evidence, verified: "exact", quote: "" }));
     const action = isFinding ? () => openFinding(item.id) : () => openRequirement(item.id);
     card.append(button("link-btn review-link", msg(isFinding ? "reviewReport" : "showRequirement"), action));
-    target.append(card);
+    }
   }
 }
 
@@ -432,6 +512,7 @@ function bindReviewTools() {
   $("download-revised").addEventListener("click", () =>
     download($("revised-preview").textContent, "text/plain;charset=utf-8", "txt", "requiragents-revised-spec"));
   $("audit-revised").addEventListener("click", () => {
+    if (!reviewState.revisedDocuments.length) return;
     const { audit, snapshot, run } = state;
     const title = $("result-title").textContent;
     runAudit(
@@ -441,6 +522,7 @@ function bindReviewTools() {
     );
   });
   $("save-version").addEventListener("click", () => {
+    if (!reviewState.revisedDocuments.length) return;
     const ok = persistVersion([...reviewState.decisions]);
     toast(msg(ok ? "versionSaved" : "versionUnsaved"));
     renderVersionHistory();

@@ -4,6 +4,7 @@ import re
 from collections import Counter
 from statistics import mean
 
+from product_review import group_findings
 from agents.auditor import passage_key, prepare_findings
 from analyzer import build_result
 from core.audit_metrics import audit_metrics, needs_human_review
@@ -148,9 +149,7 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
         })
     score = round(mean(row.quality_score for row in assessments.values()), 1) if assessments and not bundle.warnings and not partial else None
     counts = {severity: distribution[severity] for severity in SEVERITIES}
-    readiness = result.audit.readiness if audited else None
-    if readiness == "ready" and bundle.warnings:
-        readiness = "conditionally_ready"
+    readiness = result.audit.readiness if audited and not bundle.warnings else None
     score_status = ("incomplete" if bundle.warnings or partial else "critical" if readiness == "not_ready"
                     else "review" if active or readiness == "conditionally_ready" else "clear")
     report.update(mode="live", provider="Gemini", model=result.passport["configured_model"], score=score,
@@ -175,8 +174,44 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
         row.decision == "merged" for row in decisions.values()))
     if audited:
         report.update(audit_metrics(result))
+        if bundle.warnings:
+            report["score"] = None
     report["document"]["requirements"] = report.pop("native_requirements", [])
-    report["insights"] = build_insights(bundle, findings, settings.profile, mode, language)
+    grouped = group_findings(findings)
+    merged_by_target = {}
+    for decision in decisions.values():
+        if decision.decision == "merged":
+            merged_by_target.setdefault(decision.merged_into, []).append(decision.finding_id)
+
+    def group_member(fid, severity, decision):
+        original = originals[fid]
+        return {"id": fid, "severity": severity, "original_severity": original["severity"].title(),
+                "decision": decision, "agent": original.get("agent")}
+
+    groups = []
+    for group in grouped:
+        members = []
+        for row in group:
+            members.append(group_member(row["id"], row["severity"], row["audit_decision"]))
+            for fid in merged_by_target.get(row["id"], []):
+                members.append(group_member(fid, originals[fid]["severity"].title(), "merged"))
+        groups.append({"representative": group[0]["id"], "members": members})
+
+    report.update(
+        independent_audit=audited and not bundle.warnings,
+        raw_finding_count=len(originals),
+        grouped_issue_count=sum(not group[0]["review_reason"] for group in grouped),
+        issue_groups=groups,
+    )
+    # Keep the original agent findings and independent merge decisions available
+    # through native, while product views share a conservative representative set.
+    result.passport["product_counts"] = {
+        "raw": report["raw_finding_count"], "grouped": report["grouped_issue_count"],
+        "critical": counts["Critical"],
+    }
+    report["native"]["passport"]["product_counts"] = result.passport["product_counts"]
+    report["insights"] = build_insights(bundle, findings, settings.profile, mode, language,
+                                      requirements=report["document"]["requirements"] if not report["partial"] else ())
     report["coverage"].update(agents_completed=sum(module["ok"] for module in modules.values()), agents_total=len(modules),
                               criteria_in_completed_agents=0 if partial else len(CRITERIA), criteria_total=len(CRITERIA))
     report["check"].update(criteria=list(CRITERIA), completed_criteria=[] if partial else list(CRITERIA), minimum_severity="Low")

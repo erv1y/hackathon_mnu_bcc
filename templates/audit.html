@@ -130,9 +130,14 @@
             <span class="metric-label" data-msg="High">Высокий</span>
             <span id="high-val" class="metric-value">0</span>
           </div>
+          <div class="metric-card high">
+            <span class="metric-label" data-msg="Critical">Критические</span>
+            <span class="metric-value" id="critical-val">0</span>
+          </div>
           <div class="metric-card">
             <span class="metric-label" data-msg="findingsTotal">Замечания</span>
             <span id="total-val" class="metric-value">0</span>
+            <span class="hint" id="group-count"></span>
           </div>
           <div class="metric-card">
             <span class="metric-label" data-msg="requirementCount">Требования</span>
@@ -259,12 +264,12 @@
         <div id="review-compare" data-review-pane="compare" role="tabpanel" aria-labelledby="review-compare-tab" class="review-pane hidden">
           <section class="review-panel">
             <div class="review-panel-head">
-              <h3 data-msg="compareTitle">Что изменилось между версиями</h3>
+              <h3 data-msg="compareAnalysisTitle">Сравнение анализов</h3>
               <a class="btn-secondary" href="/audit" data-msg="checkAnotherVersion">Проверить другой файл или пакет</a>
             </div>
             <div class="compare-fields">
-              <label for="compare-baseline"><span data-msg="before">Было</span><select id="compare-baseline"></select></label>
-              <div><span class="hint" data-msg="after">Стало</span><strong id="compare-current"></strong></div>
+              <label for="compare-baseline"><span data-msg="compareBaselineRun">Базовый анализ</span><select id="compare-baseline"></select></label>
+              <div><span class="hint" data-msg="compareCurrentRun">Текущий анализ</span><strong id="compare-current"></strong></div>
             </div>
             <p class="hint" id="compare-help"></p>
           </section>

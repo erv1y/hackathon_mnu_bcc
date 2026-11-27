@@ -325,6 +325,10 @@ def generate_pdf(result, output_path, *, executive=False):
 
     story.append(metrics)
 
+    if product_counts := getattr(result, "passport", {}).get("product_counts"):
+        field("Исходные замечания", product_counts["raw"])
+        field("Группы замечаний", product_counts["grouped"])
+
     add("1. Распределение замечаний", "heading")
 
     rows = [["Серьёзность", "Количество"]]

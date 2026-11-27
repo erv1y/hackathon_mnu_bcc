@@ -14,7 +14,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from audit_documents import DocumentBundle, DocumentSource, safe_file_name
 from core.document_reader import read_document
-from orchestrator import document_key, run_validation
+from core.models import AuditPatch
+from orchestrator import DeepPartialRunResult, DeepRunResult, document_key, run_validation
 from web_report import AGENTS, adapt_report
 
 EXTENSIONS = {".md", ".txt", ".pdf", ".docx"}
@@ -148,17 +149,20 @@ def analyze(items, settings, language, mode, context, max_chars, emit, *, use_ca
             result = run_validation(paths, mode=mode, context=context, sections=sections,
                                     node_callback=on_node, write_reports=False, use_cache=use_cache,
                                     memory_checkpoint=memory_checkpoint, language=language)
-        if bundle.warnings and hasattr(result, "audit"):
+        if bundle.warnings and isinstance(result, DeepRunResult):
             result.passport["source_warnings"] = list(bundle.warnings)
-            result.passport["audit_metrics"]["score"] = None
-            result.audit.limitations.extend(bundle.warnings)
-            if result.audit.readiness == "ready":
-                result.audit.readiness = "conditionally_ready"
-                result.audit.executive_summary = "Проверка не охватила все страницы. " + result.audit.executive_summary
+            result.passport.pop("audit_metrics", None)
+            result = DeepPartialRunResult(
+                passport=result.passport, source_files=result.source_files,
+                execution_time_seconds=result.execution_time_seconds,
+                extraction=result.extraction, quality=result.quality, consistency=result.consistency,
+                finding_audit=AuditPatch(decisions=result.audit.decisions),
+                auditor_failure="source_coverage_incomplete",
+            )
         if not getattr(result, "auditor_failure", None):
             emit({"type": "validating", "run_kind": result.passport["run_kind"]})
         report = adapt_report(result, bundle, settings, language, timings, anchors)
-        if report.get("auditor_failure") not in (None, "consistency_incomplete"):
+        if report.get("auditor_failure") not in (None, "consistency_incomplete", "source_coverage_incomplete"):
             report["auditor_retry"] = ({"cache": True} if use_cache else
                                        {"token": AUDIT_RETRIES.save(fingerprint, memory_checkpoint)})
         return report

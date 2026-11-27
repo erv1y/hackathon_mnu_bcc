@@ -143,7 +143,7 @@ class AuditorRecoveryTests(unittest.TestCase):
         findings = self.quality.assessments[0].findings
         findings.append(findings[0].model_copy())
         row = self.result.decisions[0]
-        row.decision, row.final_severity = "confirmed", "medium"
+        row.decision, row.final_severity = "revised", "critical"
         row.root_cause, row.scope = "Same deadline concern", "Settlement"
         row.final_evidence = [FindingEvidence(requirement_id="R1", quote=TEXT,
                                               source="specification.md", paragraph=1)]
@@ -156,4 +156,11 @@ class AuditorRecoveryTests(unittest.TestCase):
         self.assertTrue(report["partial"])
         self.assertEqual(report["audited_finding_count"], 1)
         self.assertEqual(report["merged_duplicates"], 1)
+        self.assertEqual(report["counts"]["Critical"], 1)
+        pdf = self.http.post("/api/audit/pdf?executive=true", json=report["native"])
+        self.assertEqual(pdf.status_code, 200)
+        with pymupdf.open(stream=pdf.content, filetype="pdf") as document:
+            text = " ".join(document[0].get_text().split())
+        self.assertIn("Критические замечания · 1", text)
+        self.assertIn("Готовность не оценена", text)
         self.assertEqual(report["native"]["finding_audit"]["decisions"][1]["merged_into"], "QUAL-001")

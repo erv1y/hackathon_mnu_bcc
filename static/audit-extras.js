@@ -167,7 +167,40 @@ function renderCustomerQuestions() {
   $("copy-questions").disabled = $("download-questions").disabled = !rows.length;
   $("customer-question-list").replaceChildren(...(rows.length ? rows.map((row) => {
     const card = insightCard(row.question, row);
-    card.append(labelled(msg(defaultLabel(row)) + " ·", row.default, "hint"));
+    if (row.reason) card.append(labelled(msg("why"), row.reason, "hint"));
+    if (row.requirement_ids?.length) {
+      for (const id of row.requirement_ids) card.append(button("link-btn", id, () => openRequirement(id)));
+    }
+    card.append(element("p", "hint", msg(row.role || "processOwner")));
+    const saved = reviewState.clarifications.get(row.id);
+    const answer = element("input");
+    answer.type = "text";
+    answer.setAttribute("aria-label", msg("customDecision"));
+    answer.placeholder = msg("customDecision");
+    answer.value = saved?.answer || "";
+    const notes = element("textarea");
+    notes.rows = 2;
+    notes.setAttribute("aria-label", msg("decisionNotes"));
+    notes.placeholder = msg("decisionNotes");
+    notes.value = saved?.notes || "";
+    const apply = (status) => {
+      if (status === "approved" && !window.confirm(msg("confirmBusinessDecision"))) return;
+      const updated = clarificationDecision(saved, status, answer.value, notes.value);
+      if (!updated) return;
+      reviewState.clarifications.set(row.id, { ...updated, findingId: row.finding_id });
+      renderCustomerQuestions();
+    };
+    const actions = element("div", "actions");
+    for (const value of row.options || []) actions.append(button("btn-secondary", value, () => { answer.value = value; }));
+    const approve = button("btn-primary", msg("clarificationApproved"), () => apply("approved"));
+    approve.disabled = saved?.status !== "answered";
+    actions.append(button("btn-secondary", msg("clarificationAnswered"), () => apply("answered")),
+      approve, button("btn-secondary", msg("clarificationDeferred"), () => apply("deferred")));
+    if (saved?.status === "approved" && row.finding_id) {
+      actions.append(button("link-btn", msg("fixChoose"), () => openFix(row.finding_id)));
+    }
+    const status = msg(({ answered: "statusAnswered", approved: "statusApproved", deferred: "statusDeferred" }[saved?.status] || "clarificationPending"));
+    card.append(element("p", "hint", status), answer, notes, actions);
     return card;
   }) : [element("p", "hint", msg("noCustomerQuestions"))]));
 }
@@ -177,13 +210,26 @@ function customerQuestionText(language = state.audit.language) {
   return [msg("customerQuestions", {}, language), "", ...rows.flatMap((row, index) => [
     (index + 1) + ". " + row.question,
     ...row.evidence.map((proof) => "   " + lineLabel(proof, language) + " · «" + proof.text + "»"),
-    "   " + msg(defaultLabel(row), {}, language) + " · " + row.default, "",
+    ...(row.reason ? [row.reason] : []),
+    ...(reviewState.clarifications.get(row.id)?.answer ? [
+      msg(({ answered: "statusAnswered", approved: "statusApproved", deferred: "statusDeferred" }[reviewState.clarifications.get(row.id).status] || "clarificationPending"), {}, language),
+      reviewState.clarifications.get(row.id).answer, reviewState.clarifications.get(row.id).notes,
+    ] : []), "",
   ])].join("\n");
 }
 
 const SCENARIO_FIELDS = [
   ["condition", "scenarioCondition"], ["check", "scenarioCheck"], ["expected", "scenarioExpected"],
 ];
+
+function scenarioStatus(row) {
+  const edits = draftEdits(comparableFindings(state.audit).filter((item) => item.fix));
+  const touched = edits.some((edit) => row.requirement_ids?.includes(edit.requirementId) ||
+    row.evidence.some((proof) => overlaps(edit, proof)));
+  if (touched) return "testStale";
+  if (row.approval === "clarification") return "clarificationNeeded";
+  return reviewState.approvedScenarios.has(row.id) ? "statusApproved" : "clarificationPending";
+}
 
 function renderScenarios() {
   const panels = [
@@ -195,6 +241,22 @@ function renderScenarios() {
     const rows = state.audit.insights?.[key] || [];
     const panel = $(id);
     panel.replaceChildren(element("h3", "", msg(title)));
+    if (key === "scenarios" && rows.length && rows.some((row) => row.requirement_ids)) {
+      for (const [format, excel] of [["CSV", false], ["Excel", true]]) {
+        panel.append(button("btn-secondary", format, () => {
+          const headings = ["testId", "findingTitle", "requirementCount", "testSeverity", "testApproval", "scenarioCondition",
+            "testInputs", "scenarioCheck", "scenarioExpected", "excerpt"];
+          const exportRows = [headings.map((label) => msg(label)), ...rows.map((row) => [
+            row.id, row.title, row.requirement_ids?.join(", "), levelName(row.severity),
+            msg(scenarioStatus(row)),
+            row.condition, row.inputs?.join(", "), row.check, row.expected,
+            row.evidence.map((proof) => proof.text).join("\n"),
+          ])];
+          download(spreadsheetRows(exportRows, excel), excel ? "application/xml" : "text/csv;charset=utf-8",
+            excel ? "xml" : "csv", "requiragents-test-cases");
+        }));
+      }
+    }
     if (!rows.length) {
       const ambiguous = key === "ambiguities" && reportMode(state.audit) === "quick";
       panel.append(element("p", "hint", msg(ambiguous ? "deepOnly" : "noScenarios")));
@@ -207,6 +269,16 @@ function renderScenarios() {
           const step = element("li");
           step.append(labelled(msg(label) + " ·", row[field], ""));
           list.append(step);
+        }
+        for (const id of row.requirement_ids || []) card.append(button("link-btn", id, () => openRequirement(id)));
+        if (row.inputs?.length) card.append(labelled(msg("testInputs"), row.inputs.join(", "), ""));
+        const status = scenarioStatus(row);
+        if (row.approval) card.append(element("p", "hint", msg(status)));
+        if (status === "clarificationPending" && row.approval) {
+          card.append(button("btn-secondary", msg("testApprove"), () => {
+            reviewState.approvedScenarios.add(row.id);
+            renderScenarios();
+          }));
         }
         card.append(list);
       } else {
@@ -246,6 +318,10 @@ function appendInsightsMarkdown(lines, report) {
 
 function comparableFindings(report) {
   const main = report.modules.flatMap((module) => module.defects.filter((row) => !row.review_reason));
+  if (report.native && report.issue_groups) {
+    const representatives = new Set(report.issue_groups.map((group) => group.representative));
+    return main.filter((row) => representatives.has(row.id));
+  }
   return report.mode === "rules" || report.native ? main : [...main, ...(report.insights?.sanity || []), ...(report.insights?.ambiguities || [])];
 }
 
@@ -259,12 +335,12 @@ function openReviewFinding(id) {
 
 function renderReleaseDecision() {
   const { audit } = state;
-  const priorities = comparableFindings(audit).filter((row) => ["Critical", "High"].includes(row.severity) && row.evidence.length).slice(0, 3);
+  const priorities = comparableFindings(audit).filter((row) => ["Critical", "High"].includes(row.severity) && row.evidence.length).sort(sortedBySeverity).slice(0, 3);
   const status = priorities.length ? "decisionAction" : audit.partial ? "decisionPartial"
     : audit.mode === "rules" ? "decisionLocal" : "decisionReady";
   $("review-decision").dataset.tone = priorities.length ? "attention" : "neutral";
   $("decision-title").textContent = audit.native ? readinessText(audit) : msg(status);
-  $("decision-copy").textContent = audit.native ? audit.native.audit?.executive_summary || msg("preliminaryState") : msg(status + "Copy");
+  $("decision-copy").textContent = audit.native ? audit.partial ? msg(audit.finding_audit_completed ? "partialFindingAudit" : "auditPartialStatus") : msg("qualityFormula") : msg(status + "Copy");
   $("decision-findings").replaceChildren(...priorities.map((row) => {
     const item = element("li");
     const action = button("decision-link", row.title, () => openReviewFinding(row.id));
@@ -278,6 +354,7 @@ function reportDigest(report) {
   return {
     run_type: report.mode, mode: reportMode(report), source_hash: report.check?.source_hash,
     profile_hash: report.profile.fingerprint, partial: report.partial,
+    independent_audit: report.native ? report.independent_audit : undefined,
     minimum_severity: report.check?.minimum_severity || "Low",
     completed_criteria: [...new Set([
       ...(report.check?.completed_criteria || []), ...(report.insights?.checked_criteria || []),
@@ -342,13 +419,26 @@ function renderComparison() {
       }
     }
   }
+  comparison.confirmedResolutions ||= new Set();
+  const reviewed = comparison.confirmedResolutions;
   const sections = [
     ["compareNew", result.new.map((id) => after.get(id)), true],
     ["compareUnchanged", result.unchanged.map(({ after: id }) => after.get(id)), true],
-    ["compareClosed", result.closed.map((id) => before.get(id)), false],
-    ["compareUnassessed", result.unassessed.map((id) => before.get(id)), false],
+    ["compareClosed", [...result.closed, ...reviewed].map((id) => before.get(id)), false],
+    ["compareNotReproduced", result.unassessed.filter((id) => !reviewed.has(id)).map((id) => before.get(id)), false],
   ];
-  target.append(element("p", "hint", msg(result.kind === "same_source" ? "compareSameSource" : "compareConservative")));
+  target.append(element("p", "hint", msg(result.analysis_kind === "mode_comparison" ? "compareModes" : result.kind === "same_source" ? "compareSameSource" : "compareConservative")));
+  if (result.coverage_limited) target.append(element("p", "hint", msg("compareLimited")));
+  const filter = element("select");
+  filter.setAttribute("aria-label", msg("compareFilter"));
+  const all = element("option", "", msg("compareAll"));
+  all.value = "";
+  filter.append(all);
+  target.append(filter);
+  const cards = [];
+  filter.addEventListener("change", () => {
+    for (const [key, card] of cards) show(card, !filter.value || filter.value === key);
+  });
   for (const [label, findings, current] of sections) {
     const card = element("details", "audit-details compare-group");
     card.open = findings.length > 0;
@@ -360,8 +450,19 @@ function renderComparison() {
       else record.append(element("strong", "", row.title));
       const places = row.evidence.map((point) => lineLabel(point)).join(" · ");
       if (places) record.append(element("span", "hint", places));
+      if (label === "compareNotReproduced" && result.resolution_candidates?.includes(row.id)) {
+        record.append(button("btn-secondary", msg("verifyResolution"), () => {
+          if (!window.confirm(msg("confirmResolution"))) return;
+          reviewed.add(row.id);
+          renderComparison();
+        }));
+      }
       card.append(record);
     }
+    const option = element("option", "", msg(label) + " · " + findings.length);
+    option.value = label;
+    filter.append(option);
+    cards.push([label, card]);
     target.append(card);
   }
 }
