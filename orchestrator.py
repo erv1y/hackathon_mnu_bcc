@@ -14,6 +14,7 @@ from typing import Literal, TypedDict
 from uuid import uuid4
 
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import Command
 from langgraph.checkpoint.sqlite import SqliteSaver
 from core.document_reader import read_document
 from core.rule_engine import augment_consistency
@@ -24,12 +25,13 @@ from core.models import (ValidationResult, ExtractionResult, QualityAnalysisResu
 from core.advanced_report import generate_pdf
 from core.audit_metrics import audit_metrics, needs_human_review
 from core.run_metadata import tracked, now, revision, id_mapping
-from core.llm_client import MODEL_NAME, FALLBACK_MODELS, request_context, request_metrics, request_retry, request_language, request_stage
+from core.llm_client import MODEL_NAME, FALLBACK_MODELS, request_context, request_metrics, request_retry, request_language, request_stage, request_deadline
 from agents.quick_validator import quick_validate, QuickValidationResult
 from agents.extractor import extract_requirements
 from agents.quality_analyst import analyze_quality
 from agents.consistency_analyst import analyze_consistency, validate_findings
 from agents.auditor import (
+    audit_progress, audit_budget, AUDIT_SECONDS, MAX_AUDIT_REQUESTS, salvage_decisions,
     review_global_groups, apply_readiness_floor, AuditorFailure, AuditValidationError, audit_batch_size, audit_models, audit_results, audit_trace,
     prepare_findings, validate_assessments, validate_audit, validate_source_registry,
 )
@@ -37,7 +39,7 @@ from agents.auditor import (
 BASE_DIR = Path(__file__).resolve().parent
 REPORTS_DIR = BASE_DIR / 'reports'
 CACHE_DIR = BASE_DIR / '.validator_cache'
-CACHE_VERSION = '12'
+CACHE_VERSION = '13'
 logger = logging.getLogger(__name__)
 
 class DeepRunResult(ValidationResult):
@@ -57,10 +59,13 @@ class DeepPartialRunResult(QuickValidationResult):
     execution_time_seconds: float
     independent_audit: Literal[False] = False
     finding_audit: AuditPatch | None = None
-    auditor_failure: Literal["auditor_validation_failed", "auditor_provider_failed", "consistency_incomplete", "source_coverage_incomplete"]
+    audit_coverage: dict | None = None
+    auditor_failure: Literal["auditor_validation_failed", "auditor_provider_failed", "consistency_incomplete", "source_coverage_incomplete", "auditor_budget_exhausted"]
 
 
 class ValidationState(TypedDict, total=False):
+    audit_checkpoint: dict
+    audit_failure_code: str | None
     mode: str
     source_files: list[str]
     sections: list[dict]
@@ -196,7 +201,8 @@ def normalize_audit(quality, consistency, audit):
     impact = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     retained = sorted((d for d in audit.decisions if d.decision in ("confirmed", "revised") and not needs_human_review(d)),
                       key=lambda d: (impact[d.final_severity], d.action_kind != "business_decision", d.finding_id))
-    audit.priority_actions = list(dict.fromkeys(d.recommendation for d in retained))[:8]
+    if isinstance(audit, AuditResult):
+        audit.priority_actions = list(dict.fromkeys(d.recommendation for d in retained))[:8]
     return audit
 
 
@@ -258,7 +264,26 @@ def auditor_node(state):
     extraction = ExtractionResult.model_validate(state['extraction'])
     quality = QualityAnalysisResult.model_validate(state['quality'])
     consistency = ConsistencyAnalysisResult.model_validate(state['consistency'])
-    result, models = tracked(timed_analysis, 'Auditor 2.0', audit_results, state['sections'], extraction, quality, consistency, state.get('logic_debug'))
+    progress = dict(state.get("audit_checkpoint", {}))
+    token = audit_progress.set(progress)
+    deadline = time.monotonic() + AUDIT_SECONDS
+    budget_token = audit_budget.set({"remaining": MAX_AUDIT_REQUESTS, "deadline": deadline})
+    deadline_token = request_deadline.set(deadline)
+    try:
+        return run_auditor(state, extraction, quality, consistency, progress)
+    finally:
+        audit_progress.reset(token)
+        audit_budget.reset(budget_token)
+        request_deadline.reset(deadline_token)
+
+
+def run_auditor(state, extraction, quality, consistency, progress):
+    try:
+        result, models = tracked(timed_analysis, 'Auditor 2.0', audit_results, state['sections'],
+                                 extraction, quality, consistency, state.get('logic_debug'))
+    except AuditorFailure as error:
+        return {"audit_checkpoint": progress, "audit_failure_code": error.code}
+    original_consistency = consistency.model_copy(deep=True)
     original_audit = result.model_dump(mode='json')
     try:
         consistency, result, review_debug = finalize_review(extraction, consistency, result, state['sections'])
@@ -269,14 +294,22 @@ def auditor_node(state):
             result, review_models = tracked(review_global_groups, result, findings, extraction, new_ids)
             models.extend(review_models)
         apply_readiness_floor(result, state.get('logic_debug'))
-    except AuditValidationError as error:
-        logger.warning("Auditor post-review validation failed: %s", error)
-        raise AuditorFailure("auditor_validation_failed") from None
-    except ValueError:
-        logger.warning("Auditor post-review validation failed: invalid post-review findings")
-        raise AuditorFailure("auditor_validation_failed") from None
+    except (ValueError, AuditorFailure) as error:
+        logger.warning("Auditor post-review failed (%s)", type(error).__name__)
+        base = AuditResult.model_validate(original_audit)
+        validate_audit(base, prepare_findings(quality, original_consistency), extraction)
+        progress.update(
+            decisions=base.model_dump(mode="json")["decisions"],
+            summary=base.model_dump(mode="json", exclude={"decisions"}),
+            deduplication_complete=True, post_review_complete=False,
+        )
+        return {"audit_checkpoint": progress, "audit_failure_code":
+                error.code if isinstance(error, AuditorFailure) else "auditor_validation_failed",
+                "audit_models": models}
+    progress["post_review_complete"] = True
     review_debug['pre_review_audit'] = original_audit
-    return {'consistency': consistency.model_dump(mode='json'), 'audit': normalize_audit(quality, consistency, result).model_dump(mode='json'), 'audit_models': models, 'release_review_debug': review_debug}
+    return {'consistency': consistency.model_dump(mode='json'), 'audit': normalize_audit(quality, consistency, result).model_dump(mode='json'), 'audit_models': models, 'release_review_debug': review_debug,
+            'audit_checkpoint': progress, 'audit_failure_code': None}
 
 
 def quick_node(state):
@@ -306,7 +339,7 @@ def build_graph(checkpointer=None, node_callback=None, context="", metrics=None,
                 result = fn(state)
                 if node_callback:
                     status = "consistency_incomplete" if name == "consistency" and result["consistency"].get("unresolved") else "completed"
-                    node_callback(name, status)
+                    node_callback(name, result.get("audit_failure_code") or status)
                 return result
             except AuditorFailure as error:
                 if node_callback:
@@ -410,7 +443,8 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
             print('[CACHE HIT] No AI calls')
             emit_progress(progress_callback, 90, 'Cache Hit', 'Готовый анализ восстановлен из кэша.')
         else:
-            resume = bool(snapshot.next)
+            restart_auditor = mode == "deep" and bool(state.get("audit_failure_code")) and not snapshot.next
+            resume = bool(snapshot.next) or restart_auditor
             if resume:
                 run_kind = 'resume'
                 print(f'[RESUME] Pending nodes: {snapshot.next}')
@@ -439,7 +473,8 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
                     emit_progress(progress_callback, 15, 'Extractor', 'Agent 1 извлекает требования...')
             progress()
             try:
-                for update in graph.stream(None if resume else initial, config, stream_mode='updates'):
+                graph_input = Command(goto="auditor") if restart_auditor else None if resume else initial
+                for update in graph.stream(graph_input, config, stream_mode='updates'):
                     for node, payload in update.items():
                         if node not in ('extractor', 'quality', 'consistency', 'auditor', 'quick') or not payload:
                             continue
@@ -453,6 +488,8 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
             state = dict(snapshot.values)
             if audit_failure and (mode != 'deep' or snapshot.next != ('auditor',)):
                 raise audit_failure
+            if state.get('audit_failure_code') and audit_failure is None:
+                audit_failure = AuditorFailure(state['audit_failure_code'])
             if snapshot.next and not audit_failure:
                 raise RuntimeError('Graph did not finish; retry to resume.')
         passport = {'mode': mode, 'run_kind': run_kind, 'analysis_started_utc': state.get('original_started'), 'report_run_utc': now(), 'analysis_revision': state.get('original_revision'), 'current_revision': revision(), 'configured_model': MODEL_NAME, 'successful_responses': {k: state.get(k+'_models', []) for k in (['quick'] if mode == 'quick' else ['extraction','quality','consistency','audit'])}}
@@ -482,18 +519,55 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
                 consistency = ConsistencyAnalysisResult.model_validate(state['consistency'])
                 validate_assessments(quality, validate_source_registry(sections, extraction))
                 validate_findings(consistency, extraction)
+                all_findings = prepare_findings(quality, consistency)
+                checkpoint = state.get("audit_checkpoint", {})
+                stored = AuditPatch.model_validate({"decisions": checkpoint.get("decisions", [])})
+                patch = salvage_decisions(stored.decisions, all_findings, extraction)
+                token = request_language.set(language)
+                try:
+                    patch = normalize_audit(quality, consistency, patch)
+                finally:
+                    request_language.reset(token)
+                audited_ids = {row.finding_id for row in patch.decisions}
+                missing_ids = {row["id"] for row in all_findings} - audited_ids
+                reviewed_ids = set(checkpoint.get("reviewed_ids", []))
+                coverage = {
+                    "validated_count": len(audited_ids), "unresolved_ids": sorted(missing_ids & reviewed_ids),
+                    "not_reviewed_ids": sorted(missing_ids - reviewed_ids),
+                    "completed_batches": checkpoint.get("completed_batches", []),
+                    "incomplete_batches": checkpoint.get("incomplete_batches", []),
+                    "summary_validated": checkpoint.get("summary") is not None,
+                    "deduplication_complete": checkpoint.get("deduplication_complete", False),
+                    "post_review_complete": False, "document_coverage_complete": False,
+                    "readiness_eligible": False,
+                    "rejected_ids": [d.finding_id for d in patch.decisions if d.decision == "rejected"],
+                    "merged_ids": [d.finding_id for d in patch.decisions if d.decision == "merged"],
+                }
                 result = DeepPartialRunResult(passport=passport, source_files=state['source_files'],
+                    finding_audit=patch if patch.decisions else None, audit_coverage=coverage,
                     execution_time_seconds=round(time.perf_counter() - started, 2), extraction=extraction,
                     quality=quality, consistency=consistency, auditor_failure=audit_failure.code)
             else:
                 result = result_from_state(state, time.perf_counter() - started, passport)
+                checkpoint = state.get("audit_checkpoint", {})
+                coverage = {
+                    "validated_count": len(result.audit.decisions), "unresolved_ids": [],
+                    "not_reviewed_ids": [], "completed_batches": checkpoint.get("completed_batches", []),
+                    "incomplete_batches": [], "summary_validated": True,
+                    "deduplication_complete": True, "post_review_complete": True,
+                    "document_coverage_complete": not result.consistency.unresolved,
+                    "readiness_eligible": not result.consistency.unresolved,
+                    "rejected_ids": [d.finding_id for d in result.audit.decisions if d.decision == "rejected"],
+                    "merged_ids": [d.finding_id for d in result.audit.decisions if d.decision == "merged"],
+                }
+                passport["audit_coverage"] = coverage
                 if result.consistency.unresolved:
                     result = DeepPartialRunResult(
                         passport=passport, source_files=result.source_files,
                         execution_time_seconds=result.execution_time_seconds,
                         extraction=result.extraction, quality=result.quality,
                         consistency=result.consistency, auditor_failure="consistency_incomplete",
-                        finding_audit=AuditPatch(decisions=result.audit.decisions),
+                        finding_audit=AuditPatch(decisions=result.audit.decisions), audit_coverage=coverage,
                     )
     if isinstance(result, DeepRunResult):
         result.passport["audit_metrics"] = audit_metrics(result)

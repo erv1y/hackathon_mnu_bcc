@@ -576,3 +576,7 @@ select option:checked { background: var(--surface); }
 @media (forced-colors: active) {
   select:not([multiple]), select[data-language] { appearance: auto; background-image: none; }
 }
+
+@media (min-width: 1000px) { .metrics { grid-template-columns:repeat(5,minmax(0,1fr)); } }
+@media (min-width: 601px) and (max-width: 999px) { .metrics { grid-template-columns:repeat(6,minmax(0,1fr)); } .metrics > * {grid-column:span 2;} .metrics > :nth-child(n+4){grid-column:span 3;} }
+@media (max-width:600px) { .metrics > :first-child {grid-column:1/-1;} }

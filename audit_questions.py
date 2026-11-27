@@ -31,6 +31,7 @@ class QuestionFinding(DataModel):
     suggestion: str = Field(min_length=1, max_length=2200)
     clarification: str = Field(default="", max_length=500)
     severity: Severity
+    audit_status: Literal["audited", "preliminary"] | None = None
     quotes: list[Annotated[str, Field(min_length=8, max_length=1200)]] = Field(min_length=1, max_length=12)
     file_ids: list[Annotated[str, Field(pattern=r"^D[1-5]$")]] = Field(default_factory=list, max_length=12)
 
@@ -69,6 +70,7 @@ def report_findings(report: dict) -> list[QuestionFinding]:
         QuestionFinding(
             id=finding["id"], title=finding["title"], issue=finding["issue"], suggestion=finding["suggestion"],
             clarification=finding.get("clarification", ""), severity=finding["severity"],
+            audit_status=finding.get("audit_status"),
             quotes=[proof["text"] for proof in finding["evidence"]],
         )
         for module in report["modules"] for finding in module["defects"]
@@ -136,7 +138,7 @@ def unique_answer_options(options):
     for item in options:
         evidence = tuple(sorted({(proof.get("file_id") or "", proof.get("start", -1),
                                  normalized(proof["text"])) for proof in item["evidence"]}))
-        key = (normalized(item["issue"]), normalized(item["suggestion"]), evidence)
+        key = (normalized(item["issue"]), normalized(item["suggestion"]), evidence, item.get("audit_status"))
         if key not in seen:
             unique.append(item)
             seen.add(key)

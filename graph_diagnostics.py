@@ -161,7 +161,15 @@ def diagnostic_case(case, report, decisions=None):
             value = pair[field]
             row_metrics[f"{field}_assessed"] += value is not None
             row_metrics[field] += value is True
+    status_counts = {}
+    for status in ("audited", "preliminary"):
+        status_counts[status] = {
+            "expected": len(case.expected),
+            "predictions": sum(row.get("audit_status") == status for row in active),
+            "matched": sum(predictions[j].get("audit_status") == status for j in matches.values()),
+        }
     return {
+        "finding_status_counts": status_counts,
         "scenario": case.model_dump(mode="json"), "report": report,
         "expert_decisions": decisions, "strict": strict, "matching": pairs,
         "predictions": predictions, "prediction_outcomes": prediction_outcomes,
@@ -231,7 +239,17 @@ def aggregate(records):
             else individually_audited if record["partially_audited"]
             else preliminary
         )
-        destination.update(record["diagnostic_counts"])
+        breakdown = record.get("finding_status_counts", {})
+        if not record["independently_audited"] and all(
+            item.get("audit_status") in {"audited", "preliminary"}
+            for item in record["predictions"]
+        ) and breakdown:
+            if breakdown["audited"]["predictions"] or record["partially_audited"]:
+                individually_audited.update(breakdown["audited"])
+            if breakdown["preliminary"]["predictions"] or (not breakdown["audited"]["predictions"] and not record["partially_audited"]):
+                preliminary.update(breakdown["preliminary"])
+        else:
+            destination.update(record["diagnostic_counts"])
         passport = record["report"]["native"]["passport"]
         for call in passport.get("model_attempts", []):
             model_usage[call["model"]] += 1

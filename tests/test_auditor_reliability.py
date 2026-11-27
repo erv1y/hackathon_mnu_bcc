@@ -154,3 +154,33 @@ class AuditorReliabilityTests(unittest.TestCase):
                 self.assertEqual(failure.exception.code, code)
                 self.assertEqual(model.call_count, count)
                 self.assertNotIn("private", str(failure.exception))
+
+    def test_exhausted_invalid_merge_plan_preserves_base_and_retries_only_deduplication(self):
+        result = self.result.model_copy(deep=True)
+        first = result.decisions[0]
+        first.decision, first.final_severity, first.merged_into = "confirmed", "high", None
+        invalid = json.dumps({"merges": [{"finding_id": "QUAL-001", "merged_into": "UNKNOWN-99",
+                                           "audit_reason": "Unsupported representative"}]})
+        progress = {}
+        token = auditor.audit_progress.set(progress)
+        try:
+            with patch.object(auditor, "ask_gemini", side_effect=[result.model_dump_json(), *([invalid] * 3)]):
+                with self.assertRaises(auditor.AuditorFailure):
+                    self.audit()
+            self.assertFalse(progress["deduplication_complete"])
+            self.assertEqual(len(progress["decisions"]), 3)
+            self.assertIsNone(progress["decisions"][0]["merged_into"])
+            with patch.object(auditor, "ask_gemini", return_value='{"merges": []}') as retry:
+                restored = self.audit()
+            retry.assert_called_once()
+            self.assertIs(retry.call_args.kwargs["response_schema"], AuditMergePlan)
+            auditor.validate_audit(restored, self.findings, self.extraction)
+        finally:
+            auditor.audit_progress.reset(token)
+
+    def test_partial_validator_rejects_orphan_but_accepts_retained_subset(self):
+        member, representative, _ = self.result.decisions
+        auditor.validate_partial_audit(AuditPatch(decisions=[representative]), self.findings, self.extraction)
+        with self.assertRaises(auditor.AuditValidationError) as error:
+            auditor.validate_partial_audit(AuditPatch(decisions=[member]), self.findings, self.extraction)
+        self.assertIn("invalid_merge_target", str(error.exception))

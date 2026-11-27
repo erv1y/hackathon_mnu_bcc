@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from collections import Counter
 from dataclasses import dataclass
+from contextvars import ContextVar
+from time import monotonic
 from pydantic import ValidationError
 
 from core.llm_client import request_language, request_metrics
@@ -28,6 +30,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 PROMPT_PATH = BASE_DIR / "prompts" / "auditor.txt"
 
 MAX_ATTEMPTS = 3
+MAX_AUDIT_REQUESTS = 24
+AUDIT_SECONDS = 420
+audit_progress = ContextVar("audit_progress", default=None)
+audit_budget = ContextVar("audit_budget", default=None)
 DEFAULT_BATCH_SIZE = 12
 MAX_CROSS_BATCH_PAIRS = 120
 logger = logging.getLogger(__name__)
@@ -299,6 +305,28 @@ def validate_audit(result, findings, extraction_result):
     return result
 
 
+def validate_partial_audit(patch, findings, extraction):
+    """Validate every supplied decision using the complete validator on its source subset."""
+    if len({row["id"] for row in findings}) != len(findings):
+        raise AuditValidationError([AuditIssue("duplicate_input_ids")])
+    ids = {row.finding_id for row in patch.decisions}
+    sources = [finding for finding in findings if finding["id"] in ids]
+    return validate_audit(patch, sources, extraction)
+
+
+def salvage_decisions(rows, findings, extraction):
+    original = {row["id"]: row for row in findings}
+    reqs = {row.id: row for row in extraction.requirements}
+    counts = Counter(row.finding_id for row in rows)
+    accepted = {row.finding_id: row.model_copy(deep=True) for row in rows
+                if counts[row.finding_id] == 1 and row.finding_id in original
+                and not decision_issues(row, original, reqs)}
+    while issues := merge_issues(accepted, original):
+        for issue in issues:
+            accepted.pop(issue.finding_id, None)
+    return validate_partial_audit(AuditPatch(decisions=list(accepted.values())), findings, extraction)
+
+
 def apply_readiness_floor(result, logic_debug=None):
     """Conservative policy floor; no claim of complete verification."""
     retained = [d for d in result.decisions if d.decision in RETAINED]
@@ -378,6 +406,10 @@ def parse_rows(data, expected, original, reqs):
 
 
 def audit_request(payload, system, schema, stage, attempt):
+    if (budget := audit_budget.get()) is not None:
+        if budget["remaining"] <= 0 or monotonic() >= budget["deadline"]:
+            raise AuditorFailure("auditor_budget_exhausted")
+        budget["remaining"] -= 1
     primary, stronger = audit_models()
     model = stronger if attempt >= 3 and stronger else primary
     if attempt > 1 and (notify := request_retry.get()):
@@ -416,10 +448,10 @@ def log_issues(stage, attempt, issues):
                    " (additional violations omitted)" if len(distinct) > 30 else "")
 
 
-def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary):
+def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locked=(), saved_summary=None):
     original = {row["id"]: row for row in batch}
-    summary = None
-    retained = {}
+    summary = saved_summary
+    retained = {row.finding_id: row for row in locked}
     issues = []
     evidence_repairs = {}
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -428,7 +460,7 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary):
         schema = AuditResult if want_summary else AuditPatch
         scope = [row for row in batch if row["id"] in expected]
         payload = {**audit_input, "findings": scope, "overlap_hints": overlap_hints(scope)}
-        if attempt > 1:
+        if attempt > 1 or locked:
             payload.update(
                 task=("Return the required audit summary and decisions for requested_finding_ids. "
                       "If no IDs are requested, return an empty decisions array. Locked decisions are context only."
@@ -441,7 +473,11 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary):
                 evidence_repair_instruction="For each referenced source verify its relevance to the precise claim. "
                 "Attach exact evidence and justify the relationship in audit_reason, or revise unsupported wording.",
             )
-        data, issues = audit_request(payload, prompt, schema, stage, attempt)
+        try:
+            data, issues = audit_request(payload, prompt, schema, stage, attempt)
+        except AuditorFailure as error:
+            error.rows, error.summary = list(retained.values()), summary
+            raise
         if want_summary:
             try:
                 summary = AuditSummary.model_validate(data)
@@ -476,7 +512,9 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary):
         # Unknown/unsolicited rows never enter the reconstructed result.
         if set(retained) == set(original) and (summary is not None or not need_summary):
             return summary, [retained[fid] for fid in original]
-    raise AuditorFailure("auditor_validation_failed")
+    error = AuditorFailure("auditor_validation_failed")
+    error.rows, error.summary = list(retained.values()), summary
+    raise error
 
 
 def review_global_groups(result, findings, extraction, new_ids=None):
@@ -511,7 +549,11 @@ def review_global_groups(result, findings, extraction, new_ids=None):
         active = {d.finding_id for d in result.decisions if d.decision in RETAINED}
         allowed = {pair for pair in pairs[start:start + MAX_CROSS_BATCH_PAIRS] if set(pair) <= active}
         if allowed:
-            result = review_pairs(result, findings, extraction, allowed, originals)
+            try:
+                result = review_pairs(result, findings, extraction, allowed, originals)
+            except AuditorFailure as error:
+                error.valid_audit = result
+                raise
     return result
 
 
@@ -590,15 +632,64 @@ def audit_results(sections, extraction_result, quality_result, consistency_resul
         "extracted_requirements": extraction_result.model_dump(),
         "counterexample_coverage": {k: logic_debug[k] for k in ("complete", "total_possible_pairs", "reviewed_pair_ids", "unresolved_pair_ids") if k in logic_debug} if logic_debug is not None else None,
     }
-    decisions = []
+    progress = audit_progress.get()
+    if progress is None:
+        progress = {}
+    stored = AuditPatch.model_validate({"decisions": progress.get("decisions", [])})
+    decisions = salvage_decisions(stored.decisions, findings, extraction_result).decisions
+    summary = AuditSummary.model_validate(progress["summary"]) if progress.get("summary") else None
+    reviewed = set(progress.get("reviewed_ids", []))
+    completed_batches = []
+    incomplete_batches = []
+    failure = None
+    if progress.get("deduplication_complete") and summary and len(decisions) == len(findings):
+        return validate_audit(AuditResult(**summary.model_dump(), decisions=decisions), findings, extraction_result)
     for index, batch in enumerate(batches):
-        batch_header, rows = review_batch(audit_input, prompt, batch, reqs, f"batch={index + 1}/{len(batches)}",
-                                          need_summary=index == 0)
+        batch_ids = {row["id"] for row in batch}
+        locked = [row for row in decisions if row.finding_id in batch_ids]
+        if len(locked) == len(batch) and (index or summary is not None):
+            completed_batches.append(index + 1)
+            continue
+        try:
+            header, rows = review_batch(audit_input, prompt, batch, reqs, f"batch={index + 1}/{len(batches)}",
+                                        need_summary=index == 0, locked=locked, saved_summary=summary)
+        except AuditorFailure as error:
+            failure = error
+            rows, header = getattr(error, "rows", locked), getattr(error, "summary", summary)
+            incomplete_batches.append(index + 1)
+        else:
+            completed_batches.append(index + 1)
         if index == 0:
-            summary = batch_header
-        decisions.extend(rows)
-    result = validate_audit(AuditResult(**summary.model_dump(), decisions=decisions), findings, extraction_result)
-    result = review_global_groups(result, findings, extraction_result)
+            summary = header
+        if failure is None or failure.code != "auditor_budget_exhausted":
+            reviewed.update(batch_ids)
+        decisions = [row for row in decisions if row.finding_id not in batch_ids] + rows
+        if failure and failure.code in ("auditor_provider_failed", "auditor_budget_exhausted"):
+            break
+
+    patch = salvage_decisions(decisions, findings, extraction_result)
+    accepted_ids = {row.finding_id for row in patch.decisions}
+    all_ids = {row["id"] for row in findings}
+    progress.update(
+        decisions=patch.model_dump(mode="json")["decisions"],
+        summary=summary.model_dump(mode="json") if summary else None,
+        reviewed_ids=sorted(reviewed), completed_batches=completed_batches,
+        incomplete_batches=incomplete_batches,
+        unresolved_ids=sorted((all_ids & reviewed) - accepted_ids),
+        not_reviewed_ids=sorted(all_ids - reviewed - accepted_ids),
+        deduplication_complete=False,
+    )
+    logger.info("Auditor disposition validated=%d unresolved=%d not_reviewed=%d",
+                len(accepted_ids), len(progress["unresolved_ids"]), len(progress["not_reviewed_ids"]))
+    if summary is None or accepted_ids != all_ids:
+        raise failure or AuditorFailure("auditor_validation_failed")
+    result = validate_audit(AuditResult(**summary.model_dump(), decisions=patch.decisions), findings, extraction_result)
+    try:
+        result = review_global_groups(result, findings, extraction_result)
+    except AuditorFailure as error:
+        progress["decisions"] = getattr(error, "valid_audit", result).model_dump(mode="json")["decisions"]
+        raise
+    progress.update(decisions=result.model_dump(mode="json")["decisions"], deduplication_complete=True)
     logger.info("Auditor validation passed: %d decisions across %d batches", len(result.decisions), len(batches))
     return apply_readiness_floor(result, logic_debug)
 

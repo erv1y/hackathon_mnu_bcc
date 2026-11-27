@@ -152,12 +152,14 @@ def analyze(items, settings, language, mode, context, max_chars, emit, *, use_ca
         if bundle.warnings and isinstance(result, DeepRunResult):
             result.passport["source_warnings"] = list(bundle.warnings)
             result.passport.pop("audit_metrics", None)
+            coverage = result.passport.get("audit_coverage", {})
+            coverage.update(document_coverage_complete=False, readiness_eligible=False)
             result = DeepPartialRunResult(
                 passport=result.passport, source_files=result.source_files,
                 execution_time_seconds=result.execution_time_seconds,
                 extraction=result.extraction, quality=result.quality, consistency=result.consistency,
                 finding_audit=AuditPatch(decisions=result.audit.decisions),
-                auditor_failure="source_coverage_incomplete",
+                auditor_failure="source_coverage_incomplete", audit_coverage=coverage,
             )
         if not getattr(result, "auditor_failure", None):
             emit({"type": "validating", "run_kind": result.passport["run_kind"]})

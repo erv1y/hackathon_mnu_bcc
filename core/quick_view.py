@@ -7,7 +7,8 @@ from core.pdf_labels import pdf_label
 
 
 def generate_quick_pdf(result, output_path, *, executive=False):
-    from core.report_generator import draw_report_frame
+    from agents.auditor import prepare_findings
+    from core.report_generator import draw_report_frame, SEVERITY_NAMES
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.pagesizes import A4
@@ -39,6 +40,8 @@ def generate_quick_pdf(result, output_path, *, executive=False):
                   else 'Аудитор не получил пригодного ответа от Gemini.')
         if partial == "consistency_incomplete":
             reason = "Проверка согласованности завершена частично."
+        if partial == "auditor_budget_exhausted":
+            reason = "Лимит проверки исчерпан."
         if partial == "source_coverage_incomplete":
             reason = "Часть исходного документа не прочитана."
         add(label(reason) + ' ' + label('Независимый аудит не завершён. Готовность не оценена.'))
@@ -74,6 +77,17 @@ def generate_quick_pdf(result, output_path, *, executive=False):
                     for item in decision.final_evidence:
                         add(f"{item.requirement_id} | {item.source} | {item.page or '—'} / {item.paragraph or '—'}")
                         add(item.quote)
+        audited_ids = {decision.finding_id for decision in finding_audit.decisions}
+        pending = [row for row in prepare_findings(result.quality, result.consistency)
+                   if row["id"] not in audited_ids]
+        if pending:
+            add(f"{label('Предварительные замечания')} · {len(pending)}", heading)
+            for row in pending:
+                if not executive or row["severity"] in ("critical", "high"):
+                    add(f"{row['id']} | {label(SEVERITY_NAMES[row['severity']])} | {row.get('title') or row['explanation']}")
+                    if not executive:
+                        evidence = row["evidence"]
+                        add(evidence if isinstance(evidence, str) else "\n".join(item["quote"] for item in evidence))
         if not executive:
             add(label("Реестр требований"), heading)
             for requirement in result.extraction.requirements:

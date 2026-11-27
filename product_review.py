@@ -26,7 +26,7 @@ def group_findings(findings):
         # and proposed correction in addition to the evidence below.
         substance = (cause, scope, resolution) if cause and scope else (normalized(row.get("issue")), resolution)
         key = (row.get("criterion_id"), tuple(sorted(row.get("requirement_ids", []))), evidence,
-               substance, row.get("review_reason"), row.get("action_kind"))
+               substance, row.get("review_reason"), row.get("action_kind"), row.get("audit_status"))
         if row.get("verified") != "exact" or not evidence or not all(substance):
             key = (row["id"],)
         groups.setdefault(key, []).append(row)

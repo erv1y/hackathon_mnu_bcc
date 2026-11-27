@@ -502,6 +502,7 @@ function renderProgress(agents) {
 }
 
 function auditorFailureKey(code) {
+  if (code === "auditor_budget_exhausted") return "auditBudgetExhausted";
   if (code === "source_coverage_incomplete") return "coverageLimited";
   if (code === "consistency_incomplete") return "consistencyIncomplete";
   return code === "auditor_validation_failed" ? "auditorValidationFailed" : "auditorProviderFailed";
@@ -722,7 +723,7 @@ function renderReport() {
   $("result-meta").textContent = [
     source, msg(checkModeKey(reportMode(audit))),
     local ? msg("ruleReview") : audit.native?.passport.run_kind === "cache_hit" ? msg("cachedRun") : msg("completed", { done, total }),
-    audit.native && (quick || audit.auditor_failure && !audit.finding_audit_completed) ? msg("quickEstimateNotice") : "",
+    audit.native && (quick || audit.auditor_failure && !(audit.finding_audit_available || audit.finding_audit_completed)) ? msg("quickEstimateNotice") : "",
     msg("characters", { n: number(audit.spec_chars) }),
   ].filter(Boolean).join(" · ");
   show($("quick-followup"), quick);
@@ -732,11 +733,13 @@ function renderReport() {
 
   const messages = [...audit.source_warnings];
   if (audit.auditor_failure) {
-    messages.push(msg(auditorFailureKey(audit.auditor_failure)), msg("auditPartialStatus"));
+    messages.push(msg(auditorFailureKey(audit.auditor_failure)));
     if (audit.consistency_coverage_complete === false && audit.auditor_failure !== "consistency_incomplete") {
       messages.push(msg("consistencyIncomplete"));
     }
-    if (audit.finding_audit_completed) messages.push(msg("partialFindingAudit"));
+    if (audit.finding_audit_available || audit.finding_audit_completed) {
+      messages.push(msg("findingAuditCounts", {reviewed: audit.audited_finding_count || 0, pending: audit.preliminary_count || 0}));
+    }
   } else if (audit.failed_agents.length) {
     const failed = audit.modules.filter((module) => !module.ok).map((module) => module.title).join(", ");
     messages.push(done ? msg("failedModules", { modules: failed }) : msg("reviewFailed"));
@@ -768,7 +771,7 @@ function readinessText(report) {
 function renderNativeTrace(audit) {
   show($("native-status"), Boolean(audit.native),
     `${readinessText(audit)} · ${audit.elapsed_sec} s · ${({new: msg("runNew"), resume: msg("runResume"), cache_hit: msg("cachedRun")}[audit.native?.passport.run_kind] || "")}`);
-  show($("executive-pdf-btn"), Boolean(audit.mode === "replay" || audit.native && (audit.independent_audit || audit.finding_audit_completed)));
+  show($("executive-pdf-btn"), Boolean(audit.mode === "replay" || audit.native && (audit.independent_audit || audit.finding_audit_available || audit.finding_audit_completed)));
   show($("native-pdf-btn"), Boolean(audit.native || audit.mode === "replay"));
   const decisionKeys = {confirmed: "auditConfirmed", revised: "auditRevised", merged: "auditMerged", rejected: "auditRejected"};
   const decisions = audit.native?.audit?.decisions || audit.native?.finding_audit?.decisions || [];
@@ -996,6 +999,9 @@ function makeCard(defect) {
     element("h5", "", defect.title));
   if (state.comparison?.result?.new.includes(defect.id)) header.append(element("span", "badge finding-new", msg("newFinding")));
   card.append(header);
+  if (state.audit.partial && state.audit.native) {
+    card.append(element("p", "hint", msg(defect.audit_status === "audited" ? "findingAudited" : "findingPreliminary")));
+  }
   const issueGroup = state.audit.issue_groups?.find((group) => group.members.some((member) => member.id === defect.id));
   if (issueGroup?.members.length > 1) {
     const ids = issueGroup.members.map((member) => member.id);

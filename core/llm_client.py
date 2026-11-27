@@ -22,6 +22,7 @@ if os.getenv("AUDIT_DEMO_ONLY") != "1" and os.getenv("AUDIT_LOAD_DOTENV", "1") !
     load_dotenv(BASE_DIR / ".env")
 
 API_KEY = os.getenv("GEMINI_API_KEY")
+request_deadline = ContextVar("request_deadline", default=float("inf"))
 request_context = ContextVar("request_context", default="")
 request_language = ContextVar("request_language", default="ru")
 request_stage = ContextVar("request_stage", default=None)
@@ -138,7 +139,7 @@ def ask_gemini(
         )
 
     attempt_number = 0
-    deadline = time.monotonic() + REQUEST_BUDGET
+    deadline = min(time.monotonic() + REQUEST_BUDGET, request_deadline.get())
     with genai.Client(
         api_key=API_KEY,
         http_options=types.HttpOptions(

@@ -27,7 +27,7 @@ from core.llm_client import API_KEY, MODEL_NAME
 from web_engine import analyze, upload_name
 from web_report import CRITERIA, agent_list
 from tempfile import TemporaryDirectory
-from agents.auditor import prepare_findings, validate_audit
+from agents.auditor import prepare_findings, validate_audit, validate_partial_audit
 from core.report_generator import generate_pdf as generate_base_pdf
 from core.advanced_report import generate_pdf, generate_quick_pdf
 from orchestrator import DeepPartialRunResult, DeepRunResult, QuickRunResult  # noqa: E402
@@ -551,7 +551,7 @@ async def download_pdf(result: DeepRunResult | DeepPartialRunResult | QuickRunRe
                 validate_audit(result.audit, prepare_findings(result.quality, result.consistency), result.extraction)
             if finding_audit is not None:
                 from core.quick_view import generate_quick_pdf as generate_partial_pdf
-                validate_audit(finding_audit, prepare_findings(result.quality, result.consistency), result.extraction)
+                validate_partial_audit(finding_audit, prepare_findings(result.quality, result.consistency), result.extraction)
                 generate_partial_pdf(result, path, executive=executive)
                 return path.read_bytes()
             generator = generate_pdf if isinstance(result, DeepRunResult) else generate_quick_pdf

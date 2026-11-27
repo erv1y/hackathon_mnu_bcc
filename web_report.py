@@ -49,7 +49,8 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
     originals = {row["id"]: row for row in prepared}
     finding_audit = result.audit if audited else getattr(result, "finding_audit", None)
     decisions = {row.finding_id: row for row in finding_audit.decisions} if finding_audit is not None else {}
-    finding_audit_completed = finding_audit is not None
+    finding_audit_completed = finding_audit is not None and set(decisions) == set(originals)
+    has_finding_audit = finding_audit is not None
     timings = timings or {}
     anchors = anchors or {}
 
@@ -76,7 +77,7 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
     }
     if partial and result.consistency.unresolved:
         modules["security"].update(ok=False, error="consistency_incomplete", status_code=502)
-    if partial and not finding_audit_completed:
+    if partial and result.auditor_failure not in {"consistency_incomplete", "source_coverage_incomplete"}:
         modules["logic"].update(ok=False, error=result.auditor_failure, status_code=502)
     for finding_id, original in originals.items():
         decision = decisions.get(finding_id)
@@ -109,13 +110,14 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
         row = dict(primary_criterion=(decision.primary_criterion or criterion) if decision else criterion,
                    related_criteria=decision.related_criteria if decision else [],
                    severity_rationale=(decision.severity_rationale or decision.audit_reason) if decision else original.get("severity_rationale"),
-                   action_kind=decision.action_kind if decision else "clarify", id=finding_id, title=(decision.title if decision else original.get("title")) or criterion,
+                   action_kind=decision.action_kind if decision else "clarify", id=finding_id, title=(decision.title if decision else original.get("title")) or " ".join(original["explanation"].split()[:12]),
                    severity=severity, original_criterion_id=criterion, criterion_id=(decision.primary_criterion or criterion) if decision else criterion, criterion={"id": (decision.primary_criterion or criterion) if decision else criterion, "title": (decision.primary_criterion or criterion) if decision else criterion},
                    requirement_ids=ids, evidence=proofs, quote=proofs[0]["text"] if proofs else "",
                    issue=decision.explanation if decision else original["explanation"], suggestion=recommendation,
                    confidence=decision.confidence if decision else original["confidence"],
                    clarification=recommendation, verified="exact" if proofs else "unverified",
                    review_reason=reason, score_points=0, references=[], also_by=[],
+                   audit_status="audited" if decision else "preliminary",
                    audit_decision=decision.decision if decision else None,
                    audit_reason=decision.audit_reason if decision else None,
                    root_cause=decision.root_cause if decision else None,
@@ -164,10 +166,12 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
                   analysis_completed=not partial and not bundle.warnings,
                   document_coverage_complete=not partial and not bundle.warnings if deep else None,
                   finding_audit_completed=finding_audit_completed,
+                  finding_audit_available=has_finding_audit,
+                  audit_coverage=getattr(result, "audit_coverage", None) or result.passport.get("audit_coverage"),
                   consistency_coverage_complete=not result.consistency.unresolved if deep else None,
-                  audited_finding_count=len(active) if finding_audit_completed else None,
+                  audited_finding_count=sum(row["audit_status"] == "audited" for row in active) if has_finding_audit else None,
                   pending_findings=len(findings) - len(active), readiness=readiness,
-                  confirmed_count=len(active) if audited else None, preliminary_count=None if finding_audit_completed else len(active),
+                  confirmed_count=len(active) if audited else None, preliminary_count=None if finding_audit_completed else sum(row["audit_status"] == "preliminary" for row in active),
                   native=result.model_dump(mode="json"), source_warnings=list(bundle.warnings),
                   knowledge_graph=json.loads(graph_json(build_knowledge_graph(result))) if audited else None)
     report.pop("score_weights", None)

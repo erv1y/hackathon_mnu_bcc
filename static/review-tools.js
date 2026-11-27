@@ -419,8 +419,8 @@ function questionPayload(intent, question, focusId) {
   const hasFiles = Boolean(audit.document.files?.length);
   return {
     ...payload, ...(hasFiles ? { documents: reportSources(audit) } : { document: audit.document.text }),
-    findings: rows.map(({ id, title, issue, suggestion, clarification, severity, evidence }) => ({
-      id, title: Array.from(title).slice(0, 200).join(""), issue: issue.slice(0, 2200), suggestion: suggestion.slice(0, 2200), clarification: clarification?.slice(0, 500) || "", severity, quotes: evidence.map((quote) => quote.text),
+    findings: rows.map(({ id, title, issue, suggestion, clarification, severity, evidence, audit_status }) => ({
+      id, audit_status, title: Array.from(title).slice(0, 200).join(""), issue: issue.slice(0, 2200), suggestion: suggestion.slice(0, 2200), clarification: clarification?.slice(0, 500) || "", severity, quotes: evidence.map((quote) => quote.text),
       file_ids: evidence.every((quote) => quote.file_id) ? evidence.map((quote) => quote.file_id) : [],
     })),
   };
@@ -477,6 +477,7 @@ function renderQuestionAnswer() {
     card.append(element("p", "hint", msg(isFinding ? "findingSources" : "factsSources")));
     if (item.title) card.append(element("h4", "", item.title));
     if (isFinding) {
+      if (state.audit.partial && item.audit_status) card.append(element("p", "hint", msg(item.audit_status === "audited" ? "findingAudited" : "findingPreliminary")));
       if (answer.intent === "clarify") card.append(element("p", "", item.clarification));
       else {
         card.append(element("p", "", item.issue));

@@ -164,3 +164,87 @@ class AuditorRecoveryTests(unittest.TestCase):
         self.assertIn("Критические замечания · 1", text)
         self.assertIn("Готовность не оценена", text)
         self.assertEqual(report["native"]["finding_audit"]["decisions"][1]["merged_into"], "QUAL-001")
+
+    def test_mixed_audit_retains_28_out_of_29_and_resumes_only_the_missing_one(self):
+        findings = self.quality.assessments[0].findings
+        findings.extend([findings[0].model_copy() for _ in range(28)])
+        first = self.result.decisions[0].model_copy(update={
+            "decision": "revised", "final_severity": "critical",
+            "root_cause": "Risk in the settlement workflow", "scope": "Settlement",
+            "final_evidence": [FindingEvidence(requirement_id="R1", source="specification.md",
+                                               paragraph=1, quote=TEXT)],
+        })
+        decisions = {f"QUAL-{i:03d}": self.result.decisions[0].model_copy(update={"finding_id": f"QUAL-{i:03d}"})
+                     for i in range(1, 30)}
+        decisions[first.finding_id] = first
+        batches = []
+
+        def respond(**kwargs):
+            payload = json.loads(kwargs["prompt"])
+            ids = [row["id"] for row in payload["findings"]]
+            batches.append(ids)
+            if recovery and ids != ["QUAL-029"]:
+                self.fail("Completed audit decisions were requested again")
+            rows = [decisions[fid].model_dump(mode="json") for fid in ids]
+            if not recovery and "QUAL-029" in ids:
+                next(row for row in rows if row["finding_id"] == "QUAL-029")["requirement_ids"] = ["R99"]
+            answer = {"decisions": rows}
+            if kwargs["response_schema"] is AuditResult:
+                answer.update(self.result.model_dump(mode="json", exclude={"decisions"}))
+            return json.dumps(answer)
+
+        recovery = False
+        with patch.object(auditor, "ask_gemini", side_effect=respond), patch.dict("os.environ", {"AUDIT_BATCH_SIZE": "12"}):
+            partial = self.stream()[-1]
+            self.assertTrue(partial["partial"])
+            self.assertFalse(partial["finding_audit_completed"])
+            self.assertEqual(partial["audit_coverage"]["validated_count"], 28)
+            self.assertEqual(partial["audit_coverage"]["unresolved_ids"], ["QUAL-029"])
+            self.assertEqual(partial["audited_finding_count"], 1)
+            self.assertEqual(partial["preliminary_count"], 1)
+            self.assertIsNone(partial["readiness"])
+            self.assertIsNone(partial["score"])
+            display = {d["id"]: d["audit_status"] for m in partial["modules"] for d in m["defects"]}
+            self.assertEqual(display, {"QUAL-001": "audited", "QUAL-029": "preliminary"})
+            for suffix in ("", "?executive=true"):
+                exported = self.http.post("/api/audit/pdf" + suffix, json=partial["native"])
+                self.assertEqual(exported.status_code, 200)
+                with pymupdf.open(stream=exported.content, filetype="pdf") as doc:
+                    text = " ".join(word for page in doc for word in page.get_text().split())
+                    self.assertIn("Критические замечания · 1", text)
+                    self.assertIn("Предварительные замечания · 1", text)
+            recovery = True
+            resumed = self.stream(retry_token=partial["auditor_retry"]["token"])[-1]
+        self.assertTrue(resumed["independent_audit"], resumed)
+        self.assertEqual(sum(map(len, batches[:3])), 29)
+        for node in self.nodes.values():
+            node.assert_called_once()
+
+    def test_failing_post_review_keeps_validated_base_audit(self):
+        with patch.object(orchestrator, "finalize_review", side_effect=ValueError("enhancement fixture")), patch.object(
+            auditor, "ask_gemini", return_value=self.result.model_dump_json()
+        ) as ask:
+            report = self.stream()[-1]
+        self.assertFalse(report["independent_audit"])
+        self.assertEqual(report["audit_coverage"]["rejected_ids"], ["QUAL-001"])
+        self.assertTrue(report["audit_coverage"]["deduplication_complete"])
+        self.assertFalse(report["audit_coverage"]["post_review_complete"])
+        with patch.object(auditor, "ask_gemini") as retry:
+            recovered = self.stream(retry_token=report["auditor_retry"]["token"])[-1]
+        ask.assert_called_once()
+        retry.assert_not_called()
+        self.assertTrue(recovered["independent_audit"])
+
+    def test_provider_failure_after_first_batch_keeps_validated_work(self):
+        from core.llm_client import GeminiRequestError
+
+        findings = self.quality.assessments[0].findings
+        findings.extend([findings[0].model_copy(), findings[0].model_copy()])
+        with patch.dict("os.environ", {"AUDIT_BATCH_SIZE": "1"}), patch.object(
+            auditor, "ask_gemini", side_effect=[self.result.model_dump_json(), GeminiRequestError("timeout")]
+        ):
+            result = self.stream()[-1]
+        self.assertEqual(result["auditor_failure"], "auditor_provider_failed")
+        self.assertEqual(result["audit_coverage"]["rejected_ids"], ["QUAL-001"])
+        self.assertEqual(result["audit_coverage"]["unresolved_ids"], ["QUAL-002"])
+        self.assertEqual(result["audit_coverage"]["not_reviewed_ids"], ["QUAL-003"])
