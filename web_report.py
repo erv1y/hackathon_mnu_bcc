@@ -71,6 +71,8 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
                          elapsed_sec=timings.get(row["key"]))
         for row in agent_list(mode, language)
     }
+    if partial and result.auditor_failure == "consistency_incomplete":
+        modules["security"].update(ok=False, error="consistency_incomplete", status_code=502)
     if partial:
         modules["logic"].update(ok=False, error=result.auditor_failure, status_code=502)
     for finding_id, original in originals.items():
@@ -105,7 +107,7 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
                    related_criteria=decision.related_criteria if decision else [],
                    severity_rationale=(decision.severity_rationale or decision.audit_reason) if decision else original.get("severity_rationale"),
                    action_kind=decision.action_kind if decision else "clarify", id=finding_id, title=(decision.title if decision else original.get("title")) or criterion,
-                   severity=severity, criterion_id=criterion, criterion={"id": criterion, "title": criterion},
+                   severity=severity, original_criterion_id=criterion, criterion_id=(decision.primary_criterion or criterion) if decision else criterion, criterion={"id": (decision.primary_criterion or criterion) if decision else criterion, "title": (decision.primary_criterion or criterion) if decision else criterion},
                    requirement_ids=ids, evidence=proofs, quote=proofs[0]["text"] if proofs else "",
                    issue=decision.explanation if decision else original["explanation"], suggestion=recommendation,
                    confidence=decision.confidence if decision else original["confidence"],
@@ -153,7 +155,7 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
                   score_status=score_status,
                   partial=partial or bool(bundle.warnings), modules=list(modules.values()), counts=counts,
                   scored_counts=dict.fromkeys(SEVERITIES, 0) if partial else counts,
-                  failed_agents=["logic"] if partial else [],
+                  failed_agents=[k for k, module in modules.items() if not module["ok"]],
                   auditor_failure=result.auditor_failure if partial else None,
                   independent_audit=audited,
                   pending_findings=len(findings) - len(active), readiness=readiness,

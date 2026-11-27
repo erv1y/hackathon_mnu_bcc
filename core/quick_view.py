@@ -33,6 +33,8 @@ def generate_quick_pdf(result, output_path):
         add(label('Deep Validation — частичный отчёт'), heading)
         reason = ('Проверка решений аудитора не пройдена.' if partial == 'auditor_validation_failed'
                   else 'Аудитор не получил пригодного ответа от Gemini.')
+        if partial == "consistency_incomplete":
+            reason = "Проверка согласованности завершена частично."
         add(label(reason) + ' ' + label('Независимый аудит не завершён. Готовность не оценена.'))
     else:
         add(label('Quick Validation — предварительный отчёт'), heading)

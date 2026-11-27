@@ -188,6 +188,7 @@ const UI_TEXT = {
   score: ["Готовность ТЗ", "Тапсырманың дайындығы", "Readiness"],
   pageAnchor: ["Страница {n}", "{n}-бет", "Page {n}"],
   paragraphAnchor: ["Абзац {n}", "{n}-абзац", "Paragraph {n}"],
+  consistencyIncomplete: ["Проверка согласованности завершена частично", "Сәйкестік тексеруі ішінара аяқталды", "Consistency review is incomplete"],
   auditorValidationFailed: ["Решения аудитора не прошли валидацию.", "Аудитор шешімдері тексерістен өтпеді.", "The Auditor’s decisions failed validation."],
   auditorProviderFailed: ["Аудитор не получил пригодный ответ Gemini.", "Аудитор Gemini-ден жарамды жауап алмады.", "The Auditor did not receive a usable Gemini response."],
   auditPartialStatus: ["Частичный отчёт · независимый аудит не завершён · готовность не оценена", "Ішінара есеп · тәуелсіз аудит аяқталмады · дайындық бағаланбады", "Partial report · independent audit incomplete · readiness not assessed"],

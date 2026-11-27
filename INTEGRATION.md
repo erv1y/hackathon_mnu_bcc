@@ -90,3 +90,21 @@ python -m evaluate_graph --rescore benchmark-run --expert-decisions judgments.js
 диагностики можно пересчитать офлайн. У них доступны только метаданные,
 сохранённые исходным запуском. При независимой оценке незавершённые кейсы
 остаются в знаменателе полноты.
+
+Для возобновления запустите ту же версию кода и укажите тот же набор, режим и
+каталог. Каталог диагностики лучше размещать за пределами рабочего дерева,
+чтобы Git мог подтвердить чистую ревизию. Успешные и частичные записи повторно
+используются. Ошибки и непройденные случаи запускаются снова. Результаты
+предыдущих версий можно пересчитывать через `--rescore`.
+
+```bash
+python -m evaluate_graph --dataset evaluation/graph-diagnostic-v1.json --mode deep --diagnostics-dir ../benchmark-231 --output ../benchmark-231.json
+python -m evaluate_graph --dataset evaluation/graph-diagnostic-v1.json --mode deep --diagnostics-dir ../benchmark-231 --output ../benchmark-231.json --resume
+python -m unittest tests.test_release_stabilization tests.test_auditor_recovery tests.test_auditor_reliability tests.test_graph_diagnostics
+```
+
+`GEMINI_CONCURRENCY` ограничивает параллельные вызовы в процессе.
+`GEMINI_RETRY_ROUNDS`, `GEMINI_CALL_TIMEOUT_SECONDS` и
+`GEMINI_REQUEST_BUDGET_SECONDS` настраивают число раундов, тайм-аут вызова
+и бюджет одной логической операции Gemini. Бюджет отдельного вызова
+не является бюджетом всего графа.

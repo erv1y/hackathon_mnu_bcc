@@ -194,6 +194,10 @@ def coverage_issues(ids, expected):
     return issues
 
 
+def referenced_ids(explanation, reqs):
+    return {rid for rid in reqs if re.search(rf"(?<![\w-]){re.escape(rid)}(?![\w-])", explanation)}
+
+
 def decision_issues(decision, original, reqs):
     fid = decision.finding_id
     ids = set(decision.requirement_ids)
@@ -230,10 +234,8 @@ def decision_issues(decision, original, reqs):
     if (decision.decision in RETAINED and original[fid].get("category") == "contradiction"
             and len(orig_ids) > 1 and len(ids & orig_ids) < 2):
         issues.append(AuditIssue("missing_contradiction_side", fid, "final_evidence"))
-    for rid in reqs.keys() - evidence_ids:
-        if re.search(rf"(?<![\w-]){re.escape(rid)}(?![\w-])", decision.explanation):
-            issues.append(AuditIssue("unsupported_explanation_reference", fid, "explanation"))
-            break
+    if referenced_ids(decision.explanation, reqs) - evidence_ids:
+        issues.append(AuditIssue("unsupported_explanation_reference", fid, "explanation"))
     if evidence_ids != ids:
         issues.append(AuditIssue("incomplete_evidence_coverage", fid, "final_evidence"))
     return issues
@@ -419,6 +421,7 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary):
     summary = None
     retained = {}
     issues = []
+    evidence_repairs = {}
     for attempt in range(1, MAX_ATTEMPTS + 1):
         expected = set(original) - retained.keys()
         want_summary = need_summary and summary is None
@@ -431,6 +434,9 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary):
                 requested_finding_ids=sorted(expected),
                 locked_decisions=[row.model_dump(mode="json") for row in retained.values()],
                 validation_errors=[issue.describe() for issue in dict.fromkeys(issues)][:100],
+                evidence_repairs={fid: refs for fid, refs in evidence_repairs.items() if fid in expected},
+                evidence_repair_instruction="For each referenced source verify its relevance to the precise claim. "
+                "Attach exact evidence and justify the relationship in audit_reason, or revise unsupported wording.",
             )
         data, issues = audit_request(payload, prompt, schema, stage, attempt)
         if want_summary:
@@ -438,8 +444,22 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary):
                 summary = AuditSummary.model_validate(data)
             except ValidationError as error:
                 issues.extend(schema_issues(error))
+        evidence_repairs = {}
+        rows = data.get("decisions")
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict) or not isinstance(row.get("finding_id"), str):
+                continue
+            fid = row["finding_id"]
+            explanation = row.get("explanation")
+            if fid in expected and isinstance(explanation, str):
+                refs = referenced_ids(explanation, reqs)
+                if refs:
+                    evidence_repairs[fid] = [reqs[rid].model_dump(mode="json") for rid in sorted(refs)]
         parsed, row_issues = parse_rows(data, expected, original, reqs)
         issues.extend(row_issues)
+        unsupported = {issue.finding_id for issue in row_issues
+                       if issue.rule == "unsupported_explanation_reference"}
+        evidence_repairs = {fid: refs for fid, refs in evidence_repairs.items() if fid in unsupported}
         retained.update(parsed)
         # A temporarily missing representative must not invalidate otherwise valid
         # merge decisions. Check group invariants once every local row is available.

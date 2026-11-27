@@ -130,7 +130,7 @@ def analyze(items, settings, language, mode, context, max_chars, emit, *, use_ca
             event = {"type": {"started": "agent_start", "retrying": "agent_retry",
                               "reused": "agent_reused"}.get(status, "agent_done"),
                      "key": key, "ok": status in {"started", "retrying", "reused", "completed"}}
-            if status.startswith("auditor_"):
+            if status.startswith("auditor_") or status == "consistency_incomplete":
                 event["code"] = status
             emit(event)
 
@@ -158,7 +158,7 @@ def analyze(items, settings, language, mode, context, max_chars, emit, *, use_ca
         if not getattr(result, "auditor_failure", None):
             emit({"type": "validating", "run_kind": result.passport["run_kind"]})
         report = adapt_report(result, bundle, settings, language, timings, anchors)
-        if report.get("auditor_failure"):
+        if report.get("auditor_failure") not in (None, "consistency_incomplete"):
             report["auditor_retry"] = ({"cache": True} if use_cache else
                                        {"token": AUDIT_RETRIES.save(fingerprint, memory_checkpoint)})
         return report

@@ -110,3 +110,15 @@ class AuditorRecoveryTests(unittest.TestCase):
             self.assertEqual(report["auditor_retry"], {"cache": True})
             self.assertEqual(len(list((self.root / "checkpoints").glob("*.sqlite"))), 1)
             self.assert_recovered(self.stream(cache="true"))
+
+    def test_incomplete_consistency_keeps_quality_and_never_starts_model_audit(self):
+        self.consistency.unresolved = [{"phase": "global", "code": "unresolved_candidates", "candidate_indices": [2]}]
+        with patch.object(orchestrator, "audit_results") as audit:
+            events = self.stream()
+        audit.assert_not_called()
+        report = events[-1]
+        self.assertEqual(report["auditor_failure"], "consistency_incomplete")
+        self.assertEqual(report["preliminary_count"], 1)
+        self.assertEqual(report["failed_agents"], ["security", "logic"])
+        self.assertNotIn("auditor_retry", report)
+        self.assertEqual(report["native"]["consistency"]["unresolved"][0]["candidate_indices"], [2])

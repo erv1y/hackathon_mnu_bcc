@@ -2,6 +2,7 @@
 import re
 
 LABELS = {
+    "Проверка согласованности завершена частично.": ("Consistency review is incomplete.", "Сәйкестік тексеруі ішінара аяқталды."),
     "Deep Validation — частичный отчёт": ("Deep validation — partial report", "Терең тексеру — ішінара есеп"),
     "Quick Validation — предварительный отчёт": ("Quick validation — preliminary report", "Жедел тексеру — алдын ала есеп"),
     "Проверка решений аудитора не пройдена.": ("Auditor decisions did not pass validation.", "Аудитор шешімдері тексерістен өтпеді."),

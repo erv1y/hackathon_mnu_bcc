@@ -4,6 +4,9 @@ import os
 from contextvars import ContextVar
 import time
 import random
+from threading import BoundedSemaphore, Lock
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from core.run_metadata import record_model
 from core.analytical_policy import LANGUAGE_NAMES, POLICY
 from pathlib import Path
@@ -37,7 +40,35 @@ FALLBACK_MODELS = [
     "gemini-3.1-flash-lite"
 ]
 
-MAX_ROUNDS = 2
+def env_limit(name, default, maximum):
+    try:
+        return max(1, min(maximum, int(os.getenv(name, str(default)))))
+    except ValueError:
+        return default
+
+
+MAX_ROUNDS = env_limit("GEMINI_RETRY_ROUNDS", 2, 5)
+REQUEST_BUDGET = env_limit("GEMINI_REQUEST_BUDGET_SECONDS", 150, 600)
+CALL_TIMEOUT = env_limit("GEMINI_CALL_TIMEOUT_SECONDS", 60, 180)
+CONCURRENCY = env_limit("GEMINI_CONCURRENCY", 2, 16)
+_slots = BoundedSemaphore(CONCURRENCY)
+_cooldowns = {}
+_cooldown_lock = Lock()
+
+
+def retry_after(error):
+    headers = getattr(getattr(error, "response", None), "headers", {})
+    value = (headers or {}).get("Retry-After")
+    if value is None:
+        return None
+    try:
+        return max(0, float(value))
+    except ValueError:
+        try:
+            return max(0, (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds())
+        except (ValueError, TypeError, OverflowError):
+            return None
+
 
 RETRYABLE_ERRORS = {
     429, 500, 502, 503, 504
@@ -107,10 +138,11 @@ def ask_gemini(
         )
 
     attempt_number = 0
+    deadline = time.monotonic() + REQUEST_BUDGET
     with genai.Client(
         api_key=API_KEY,
         http_options=types.HttpOptions(
-            timeout=60000,
+            timeout=min(CALL_TIMEOUT, REQUEST_BUDGET) * 1000,
             retry_options=types.HttpRetryOptions(
                 attempts=1
             )
@@ -128,6 +160,13 @@ def ask_gemini(
 
                 if current_model in unavailable_models:
                     continue
+                with _cooldown_lock:
+                    cooldown = _cooldowns.get(current_model, 0)
+                if cooldown > time.monotonic():
+                    continue
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not _slots.acquire(timeout=remaining):
+                    raise GeminiRequestError("Gemini request latency budget exhausted.")
 
                 started = time.perf_counter()
                 attempt = None
@@ -156,7 +195,11 @@ def ask_gemini(
                             contents=prompt,
                             config=(
                                 types.GenerateContentConfig(
-                                    **config_data
+                                    **config_data,
+                                    http_options=types.HttpOptions(
+                                        timeout=max(1, int(min(CALL_TIMEOUT, deadline - time.monotonic()) * 1000)),
+                                        retry_options=types.HttpRetryOptions(attempts=1),
+                                    ),
                                 )
                             )
                         )
@@ -197,6 +240,11 @@ def ask_gemini(
                     last_error = error
 
                     code = error.code
+                    delay = retry_after(error) if code in RETRYABLE_ERRORS else None
+                    if code == 429 or delay is not None:
+                        with _cooldown_lock:
+                            _cooldowns[current_model] = time.monotonic() + (
+                                delay if delay is not None else min(60, 5 * 2 ** round_number) + random.random())
                     attempt.update(status="provider_error", provider_code=code)
 
                     print(
@@ -229,6 +277,7 @@ def ask_gemini(
                     )
 
                 finally:
+                    _slots.release()
                     if attempt is not None:
                         attempt["elapsed_seconds"] = round(time.perf_counter() - started, 3)
 
@@ -247,6 +296,13 @@ def ask_gemini(
                     f"{delay:.1f} seconds"
                 )
 
+                with _cooldown_lock:
+                    waits = [_cooldowns.get(name, 0) - time.monotonic()
+                             for name in models if name not in unavailable_models]
+                if waits and min(waits) > 0:
+                    delay = max(delay, min(waits))
+                if delay >= deadline - time.monotonic():
+                    break
                 time.sleep(delay)
 
     raise GeminiRequestError(

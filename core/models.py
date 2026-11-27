@@ -112,6 +112,7 @@ class ConsistencyFinding(BaseModel):
 
 
 class ConsistencyAnalysisResult(BaseModel):
+    unresolved: list[dict] = Field(default_factory=list)
     findings: list[ConsistencyFinding]
     summary: str
 

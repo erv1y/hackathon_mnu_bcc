@@ -73,7 +73,7 @@ def augment_consistency(extraction, consistency, sections=None):
         f.id=f'RULE-{n:03d}'
         used.add(f.id)
     print(f'[RULE ENGINE] {len(rules)} additional candidates')
-    return ConsistencyAnalysisResult(findings=[*consistency.findings,*rules],
+    return ConsistencyAnalysisResult(unresolved=consistency.unresolved,findings=[*consistency.findings,*rules],
         summary=consistency.summary+f' | Программные проверки: {len(rules)} дополнительных кандидатов до аудита.')
 
 

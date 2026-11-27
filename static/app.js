@@ -502,6 +502,7 @@ function renderProgress(agents) {
 }
 
 function auditorFailureKey(code) {
+  if (code === "consistency_incomplete") return "consistencyIncomplete";
   return code === "auditor_validation_failed" ? "auditorValidationFailed" : "auditorProviderFailed";
 }
 

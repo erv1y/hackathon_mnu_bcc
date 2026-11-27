@@ -16,7 +16,9 @@ def diagnostic_case(case, report, decisions=None):
     report = {key: value for key, value in report.items() if key != "auditor_retry"}
     predictions = [row for module in report["modules"] for row in module["defects"]]
     active = [row for row in predictions if row.get("review_reason") is None]
-    strict_report = {**report, "modules": [{"defects": active}]}
+    legacy_active = [dict(row, criterion_id=row.get("original_criterion_id", row["criterion_id"]))
+                     for row in active]
+    strict_report = {**report, "modules": [{"defects": legacy_active}]}
     strict = measure_case(case, strict_report)
     passport = report["native"]["passport"]
     requirements = report["native"]["extraction"]["requirements"]
@@ -34,7 +36,7 @@ def diagnostic_case(case, report, decisions=None):
                   " ".join(q["text"].split()) in " ".join(sources.get(q.get("file_name"), "").split())
                   for q in row["evidence"]] for row in predictions]
     by_id = {id(row): j for j, row in enumerate(predictions)}
-    strict_matches = {i: by_id[id(active[j])] for i, j in _match_findings(case.expected, active).items()}
+    strict_matches = {i: by_id[id(active[j])] for i, j in _match_findings(case.expected, legacy_active).items()}
     pairs = []
     normalized_keys = {f"{i}:{j}" for i in range(len(case.expected)) for j in range(len(predictions))}
     if set(decisions) - normalized_keys:
@@ -56,10 +58,10 @@ def diagnostic_case(case, report, decisions=None):
             semantic = review.get("same_defect", anchors and same_wording)
             pairs.append({
                 "expected_index": i, "prediction_index": j,
-                "strict_eligible": row in active and _matches(label, row),
+                "strict_eligible": row in active and _matches(label, dict(row, criterion_id=row.get("original_criterion_id", row["criterion_id"]))),
                 "strict_reasons": [reason for reason, failed in (
                     ("manual_review_candidate", row not in active),
-                    ("criterion_mismatch", label.criterion_id != row["criterion_id"]),
+                    ("criterion_mismatch", label.criterion_id != row.get("original_criterion_id", row["criterion_id"])),
                     ("missing_criterion_metadata", not row.get("criterion")),
                     ("evidence_status_mismatch", label.evidence != row["verified"]),
                     ("expected_anchor_missing", bool(label.anchors) and not all(
@@ -200,6 +202,7 @@ def aggregate(records):
         "critical_detection_recall": _ratio(m["detected_Critical"], m["expected_Critical"]),
         "high_detection_recall": _ratio(m["detected_High"], m["expected_High"]),
         "detection_recall": _ratio(m["matched"], m["expected"]),
+        "full_suite_semantic_recall": _ratio(m["matched"], m["expected"]),
         "evidence_authenticity": _ratio(m["authentic"], m["quotes"]),
         "evidence_relevance": _ratio(m["evidence_relevant"], m["evidence_relevant_assessed"]),
         "recommendation_quality": _ratio(m["recommendation_adequate"], m["recommendation_adequate_assessed"]),
@@ -207,6 +210,7 @@ def aggregate(records):
         "manual_review_candidate_rate": _ratio(m["manual"], m["findings"]),
         "extraction_coverage": legacy["extraction_coverage"],
         "agent_reliability": legacy["agent_success_rate"],
+        "full_suite_agent_reliability_lower_bound": legacy["agent_success_rate"],
         "counts": dict(m),
     }
     matrix = {level: {actual: sum(r["severity_confusion"][level][actual] for r in records)

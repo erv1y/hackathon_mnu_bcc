@@ -4,7 +4,10 @@ import json
 from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel, Field
-from core.llm_client import ask_gemini
+from core.llm_client import GeminiRequestError, ask_gemini
+import logging
+
+logger = logging.getLogger(__name__)
 from core.models import (ExtractionResult, ConsistencyAnalysisResult,
                          ConsistencyFinding, FindingEvidence)
 
@@ -35,6 +38,15 @@ class ConsistencyCandidate(BaseModel):
 
 class ConsistencyCandidateResult(BaseModel):
     findings: list[ConsistencyCandidate]
+    summary: str
+
+
+class IndexedCandidate(ConsistencyCandidate):
+    candidate_index: int
+
+
+class ConsistencyRepair(BaseModel):
+    findings: list[IndexedCandidate]
     summary: str
 
 
@@ -165,41 +177,80 @@ def analyze_consistency(extraction_result, sections=None):
     passes = [('global', 'Compare obligations, scope, exceptions, definitions, dependencies, and duplicates.'),
               ('scenario', 'Construct concrete counterexamples: boundary and temporal cases, repeated events, state transitions, acceptance-test outcomes, and API contract behavior. Check the same conditions and all exceptions. Look independently for missed conflicts.')]
     all_findings = []
+    unresolved = []
     pass_summaries = []
     seen = set()
     for name, focus in passes:
         print(f'[CONSISTENCY PASS] {name}')
         payload = {**base, 'pass': name, 'focus': focus}
-        last_error = None
-        for attempt in range(1, MAX_ATTEMPTS+1):
-            print(f'[AGENT 3] Validation attempt {attempt}/{MAX_ATTEMPTS}')
-            response = ask_gemini(prompt=json.dumps(payload, ensure_ascii=False),
-                system_instruction=instruction, model='gemini-3.5-flash-lite',
-                response_schema=ConsistencyCandidateResult)
+        retained = {}
+        pending = None
+        summary = ""
+        for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
-                candidate = ConsistencyCandidateResult.model_validate_json(clean_response(response))
-                result = materialize(candidate, extraction_result)
+                response = ask_gemini(prompt=json.dumps(payload, ensure_ascii=False),
+                    system_instruction=instruction, model='gemini-3.5-flash-lite',
+                    response_schema=ConsistencyCandidateResult if pending is None else ConsistencyRepair)
+            except GeminiRequestError:
+                unresolved.append(dict(phase=name, code="provider_error",
+                                       candidate_indices=sorted(pending or {})))
                 break
-            except (ValueError, TypeError) as error:
-                last_error = error
-                print(f'[CONSISTENCY CORRECTION] {type(error).__name__}')
-                payload['correction'] = {'error': str(error), 'instruction':
-                    'Return the complete corrected findings. Keep supported findings and use only real IDs.'}
+            try:
+                data = json.loads(clean_response(response))
+                rows = data["findings"]
+                if not isinstance(rows, list) or not isinstance(data.get("summary"), str):
+                    raise ValueError("invalid envelope")
+            except (ValueError, TypeError, KeyError):
+                logger.warning("Consistency phase=%s attempt=%d code=invalid_envelope", name, attempt)
+                continue
+            summary = data["summary"] or summary
+            previous = pending
+            pending = {} if previous is None else dict(previous)
+            seen_indices = set()
+            for index, row in enumerate(rows):
+                slot = index if previous is None else row.get("candidate_index") if isinstance(row, dict) else None
+                if type(slot) is not int or (previous is not None and slot not in previous):
+                    continue
+                if slot in seen_indices:
+                    retained.pop(slot, None)
+                    pending[slot] = "duplicate_candidate_index"
+                    continue
+                seen_indices.add(slot)
+                try:
+                    candidate = ConsistencyCandidate.model_validate(row)
+                    result = materialize(ConsistencyCandidateResult(findings=[candidate], summary=""), extraction_result)
+                except ValueError as error:
+                    code = "two_distinct_requirements_needed" if "two distinct" in str(error) else "invalid_candidate"
+                    pending[slot] = code
+                    logger.warning("Consistency phase=%s attempt=%d candidate=%d code=%s", name, attempt, slot, code)
+                else:
+                    retained[slot] = result.findings[0]
+                    pending.pop(slot, None)
+            if not pending:
+                break
+            payload["repair"] = {
+                "requested": [{"candidate_index": slot, "code": code,
+                               "candidate": rows[slot] if previous is None else None}
+                              for slot, code in sorted(pending.items())],
+                "instruction": "Return only corrected requested candidates with their candidate_index and summary. "
+                               "Use existing source IDs. Preserve meaning and evidence. Omit candidates you cannot repair.",
+            }
         else:
-            raise RuntimeError(f'Consistency pass {name} failed validation.') from last_error
-        pass_summaries.append(f"{name}: {result.summary}")
-        for f in result.findings:
+            unresolved.append(dict(phase=name, code="unresolved_candidates" if pending else "invalid_envelope",
+                                   candidate_indices=sorted(pending or {})))
+        pass_summaries.append(f"{name}: {summary}")
+        for f in retained.values():
             # Merge exact repeated descriptions only; the Auditor handles semantic duplicates.
             key = (f.category, tuple(sorted(f.requirement_ids)),
                    ' '.join(f.title.casefold().split()), ' '.join(f.explanation.casefold().split()))
             if key not in seen:
                 seen.add(key)
                 all_findings.append(f.model_copy(update={'id': f'CON-{len(all_findings)+1:03d}'}))
-        print(f'[CONSISTENCY PASS] {name}: {len(result.findings)} candidates')
+        print(f'[CONSISTENCY PASS] {name}: {len(retained)} candidates')
     summary = (f'Выполнены общий и сценарный анализы. Сохранено {len(all_findings)} '
                'кандидатов замечаний до аудита. Совпадающие по смыслу замечания могут потребовать объединения. '
                'Комментарии AI (не отдельные подтверждённые замечания): ' + ' | '.join(pass_summaries))
-    result = validate_findings(ConsistencyAnalysisResult(findings=all_findings, summary=summary), extraction_result)
+    result = validate_findings(ConsistencyAnalysisResult(findings=all_findings, summary=summary if not unresolved else "Consistency coverage incomplete.", unresolved=unresolved), extraction_result)
     print(f'[AGENT 3] Found {len(result.findings)} consistency issues')
     print('[VALIDATOR] Evidence validation passed')
     return result

@@ -56,7 +56,7 @@ class DeepPartialRunResult(QuickValidationResult):
     source_files: list[str]
     execution_time_seconds: float
     independent_audit: Literal[False] = False
-    auditor_failure: Literal["auditor_validation_failed", "auditor_provider_failed"]
+    auditor_failure: Literal["auditor_validation_failed", "auditor_provider_failed", "consistency_incomplete"]
 
 
 class ValidationState(TypedDict, total=False):
@@ -179,7 +179,13 @@ def normalize_audit(quality, consistency, audit):
                 "en": "The process owner should resolve ‘{title}’ for {refs}. Compare the conditions and exceptions in the quoted rules. Record one approved outcome for each disputed and boundary case in acceptance tests.",
                 "kk": "Процесс иесі {refs} үшін «{title}» мәселесін шешуі керек. Дәйексөздердегі шарттар мен ерекшеліктерді салыстырыңыз. Әр даулы және шекаралық жағдай үшін мақұлданған нәтижені қабылдау сынағында бекітіңіз.",
             }
-            d.recommendation = templates[request_language.get()].format(refs=refs, title=d.title)
+            proposal = {
+                "ru": "Предложение для проверки, требует утверждения",
+                "en": "Proposal for review, approval required",
+                "kk": "Тексеруге арналған ұсыныс, мақұлдау қажет",
+            }[request_language.get()]
+            d.recommendation = (f"{proposal}. {d.recommendation} "
+                                + templates[request_language.get()].format(refs=refs, title=d.title))
         if d.final_severity in ("high", "critical") and not d.severity_rationale.strip():
             d.severity_rationale = d.audit_reason
         if d.action_kind == "rewrite":
@@ -251,6 +257,8 @@ def auditor_node(state):
     extraction = ExtractionResult.model_validate(state['extraction'])
     quality = QualityAnalysisResult.model_validate(state['quality'])
     consistency = ConsistencyAnalysisResult.model_validate(state['consistency'])
+    if consistency.unresolved:
+        raise AuditorFailure('consistency_incomplete')
     result, models = tracked(timed_analysis, 'Auditor 2.0', audit_results, state['sections'], extraction, quality, consistency, state.get('logic_debug'))
     original_audit = result.model_dump(mode='json')
     try:
@@ -298,7 +306,8 @@ def build_graph(checkpointer=None, node_callback=None, context="", metrics=None,
                     node_callback(name, "started")
                 result = fn(state)
                 if node_callback:
-                    node_callback(name, "completed")
+                    status = "consistency_incomplete" if name == "consistency" and result["consistency"].get("unresolved") else "completed"
+                    node_callback(name, status)
                 return result
             except AuditorFailure as error:
                 if node_callback:
