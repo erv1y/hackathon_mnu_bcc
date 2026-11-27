@@ -4,7 +4,7 @@ import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from docx import Document
 from fastapi.testclient import TestClient
@@ -134,7 +134,9 @@ class GraphWebTests(unittest.TestCase):
             quality={"assessments": [{"requirement_id": "R1", "quality_score": 80, "status": "passed", "findings": []}]},
             consistency={"findings": [], "summary": "No preliminary findings"},
         )
-        with patch.object(orchestrator, "quick_validate", return_value=quick), patch.object(orchestrator, "audit_results") as auditor:
+        with patch("agents.quick_validator.ask_gemini", return_value=quick.model_dump_json()), patch.object(
+            orchestrator, "audit_results"
+        ) as auditor:
             response = self.http.post("/api/audit/stream", data={"text": text, "mode": "quick", "consent": "true"})
         events = [json.loads(line) for line in response.text.splitlines() if line]
         self.assertEqual(events[-1]["type"], "result", events)
@@ -142,6 +144,26 @@ class GraphWebTests(unittest.TestCase):
         self.assertFalse(events[-1]["native"]["independent_audit"])
         self.assertEqual([event["key"] for event in events if event["type"] == "agent_start"], ["quick"])
         auditor.assert_not_called()
+        native = events[-1]["native"]
+        self.assertEqual(native["consistency"]["unresolved"], [])
+        pdf = self.http.post("/api/audit/pdf", json=native)
+        self.assertEqual(pdf.status_code, 200)
+        with pymupdf.open(stream=pdf.content, filetype="pdf") as document:
+            self.assertIn(text, " ".join(document[0].get_text().split()))
+        empty_audit = AuditResult(
+            extraction_audit={"status": "complete", "missing_requirements": [],
+                              "unsupported_requirements": [], "comments": "Reviewed"},
+            decisions=[], readiness="ready", executive_summary="Reviewed", priority_actions=[], limitations=[],
+        )
+        with patch.multiple(orchestrator, extract_requirements=Mock(return_value=quick.extraction),
+                            analyze_quality=Mock(return_value=quick.quality),
+                            analyze_consistency=Mock(return_value=quick.consistency),
+                            analyze_counterexamples=lambda _e, consistency, *_: consistency,
+                            audit_results=Mock(return_value=empty_audit)):
+            deep = self.http.post("/api/audit/stream", data={"text": text, "mode": "deep", "consent": "true"})
+        deep_result = json.loads(deep.text.splitlines()[-1])
+        self.assertEqual(deep_result["type"], "result", deep.text)
+        self.assertTrue(deep_result["independent_audit"])
 
     def test_cache_hit_does_not_emit_agent_completion_and_cli_still_exports(self):
         text = "The service records a transfer once for any unique operation identifier."
