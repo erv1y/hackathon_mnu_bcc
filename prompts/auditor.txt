@@ -27,4 +27,16 @@ Rank severity by evidenced business impact, exposure and recoverability. Missing
 is a review question. A maintenance window alone does not disprove an availability objective.
 Return plain recommendations without REWRITE markers.
 
-Set assessment_kind to defect only for a demonstrated discrepancy. Use question for a missing business decision without a demonstrated defect and potential_risk for a plausible but unverified risk. Keep these separate from confirmed defects, including in merges.
+Assess defect validity independently of resolution authority and severity, in every
+document language. A stated obligation with explicitly vague or unverifiable wording
+is a confirmed defect when the missing measurable conditions prevent acceptance
+testing. Use business_decision when the owner must approve thresholds, targets or
+policy, even for a confirmed defect. Use question and potential_risk only when the
+defect itself is unproven. Every requirement ID in the explanation needs its own
+verified evidence in final_evidence.
+
+For availability obligations, check applicable targets, measurement period and
+method, service scope, maintenance exclusions, and recovery objectives. Ask for
+missing definitions. Maintenance or updates alone do not establish technical
+impossibility or downtime. State incompatibility only with evidence that both
+rules apply under the same conditions and require incompatible outcomes.

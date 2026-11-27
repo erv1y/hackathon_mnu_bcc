@@ -99,11 +99,18 @@ class GraphWebTests(unittest.TestCase):
         pdf = self.http.post("/api/audit/pdf", json=report["native"])
         self.assertEqual(pdf.status_code, 200, pdf.text if pdf.status_code != 200 else "")
         self.assertTrue(pdf.content.startswith(b"%PDF-"))
+        full_sentence = "The expected business behavior must remain readable after wrapping onto another line."
+        report["native"]["audit"]["decisions"][0]["explanation"] = (
+            "The proposed limits cover a single operation and affect the actual workflow. " * 5
+            + full_sentence
+        )
         executive = self.http.post("/api/audit/pdf?executive=true", json=report["native"])
         self.assertEqual(executive.status_code, 200)
         with pymupdf.open(stream=executive.content, filetype="pdf") as doc:
             self.assertIn(len(doc), (2, 3))
-            self.assertIn("CON-001", "".join(page.get_text() for page in doc))
+            pdf_text = " ".join(" ".join(page.get_text().split()) for page in doc)
+            self.assertIn("CON-001", pdf_text)
+            self.assertIn(full_sentence, pdf_text)
         metrics = report["native"]["passport"]["audit_metrics"]
         for key in ("score", "score_formula", "counts", "merged_duplicates"):
             self.assertEqual(report[key], metrics[key])

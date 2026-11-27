@@ -18,3 +18,9 @@ with the outcome presented to the customer when notification delivery fails. For
 security compare authentication failure, lockout, recovery and permitted reset authority.
 Consider different channels, currencies, time windows and fee bases before claiming a
 conflict. If the conditions are not demonstrably comparable, ask for clarification.
+
+For availability obligations, check applicable targets, measurement period and
+method, service scope, maintenance exclusions, and recovery objectives. Ask for
+missing definitions. Maintenance or updates alone do not establish technical
+impossibility or downtime. State incompatibility only with evidence that both
+rules apply under the same conditions and require incompatible outcomes.

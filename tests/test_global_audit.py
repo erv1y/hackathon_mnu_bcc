@@ -65,3 +65,40 @@ class GlobalAuditTests(unittest.TestCase):
         with self.assertRaises(auditor.AuditValidationError) as failure:
             auditor.validate_audit(result, auditor.prepare_findings(quality, consistency), extraction)
         self.assertIn("missing_contradiction_side", str(failure.exception))
+
+    def test_verified_vagueness_can_require_business_authority(self):
+        _, _, quality, consistency, result = fixtures()
+        row = result.decisions[1]
+        row.title = "Требование о быстром завершении непроверяемо"
+        row.action_kind = "business_decision"
+        normalize_audit(quality, consistency, result)
+        self.assertEqual(row.assessment_kind, "defect")
+        self.assertEqual(row.action_kind, "business_decision")
+        self.assertEqual(row.final_severity, "high")
+
+    def test_references_require_evidence_and_duplicate_quotes_are_removed(self):
+        extraction, _, quality, consistency, result = fixtures()
+        findings = auditor.prepare_findings(quality, consistency)
+        row = result.decisions[1]
+        row.final_evidence.append(row.final_evidence[0].model_copy())
+        auditor.validate_audit(result, findings, extraction)
+        self.assertEqual(len(row.final_evidence), 2)
+        row.explanation = "Срок из R3 тоже затронут."
+        with self.assertRaisesRegex(auditor.AuditValidationError, "unsupported_explanation_reference"):
+            auditor.validate_audit(result, findings, extraction)
+
+    def test_manual_candidate_can_merge_with_an_equivalent_candidate(self):
+        extraction, _, quality, consistency, result = fixtures()
+        target = result.decisions[1]
+        target.assessment_kind = "potential_risk"
+        review = target.model_copy(deep=True, update={"finding_id": "REVIEW-870"})
+        result.decisions.append(review)
+        findings = auditor.prepare_findings(quality, consistency)
+        findings.append({**findings[1], "id": review.finding_id})
+        proposal = {"merges": [{"finding_id": review.finding_id,
+                                "merged_into": target.finding_id,
+                                "audit_reason": "Identical access scenario and required decision"}]}
+        with patch.object(auditor, "ask_gemini", return_value=json.dumps(proposal)):
+            audited = auditor.review_global_groups(result, findings, extraction, {review.finding_id})
+        self.assertEqual(audited.decisions[-1].merged_into, target.finding_id)
+        self.assertEqual(audited.decisions[2].decision, "revised")

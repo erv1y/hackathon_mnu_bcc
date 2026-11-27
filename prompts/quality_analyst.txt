@@ -17,3 +17,9 @@ are in scope distinguish delivery failure from transaction failure. Check which 
 rounding, retries and status are observable. Missing context alone is a clarification
 question, not evidence of an actual financial loss. An availability target requires
 a measurement window and maintenance policy; maintenance alone does not prove impossibility.
+
+For availability obligations, check applicable targets, measurement period and
+method, service scope, maintenance exclusions, and recovery objectives. Ask for
+missing definitions. Maintenance or updates alone do not establish technical
+impossibility or downtime. State incompatibility only with evidence that both
+rules apply under the same conditions and require incompatible outcomes.

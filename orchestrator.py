@@ -30,7 +30,7 @@ from agents.extractor import extract_requirements
 from agents.quality_analyst import analyze_quality
 from agents.consistency_analyst import analyze_consistency, validate_findings
 from agents.auditor import (
-    AuditorFailure, AuditValidationError, audit_batch_size, audit_models, audit_results, audit_trace,
+    review_global_groups, apply_readiness_floor, AuditorFailure, AuditValidationError, audit_batch_size, audit_models, audit_results, audit_trace,
     prepare_findings, validate_assessments, validate_audit, validate_source_registry,
 )
 
@@ -242,7 +242,12 @@ def auditor_node(state):
     try:
         consistency, result, review_debug = finalize_review(extraction, consistency, result, state['sections'])
         validate_findings(consistency, extraction)
-        validate_audit(result, prepare_findings(quality, consistency), extraction)
+        findings = prepare_findings(quality, consistency)
+        validate_audit(result, findings, extraction)
+        if new_ids := set(review_debug["added_review_ids"]):
+            result, review_models = tracked(review_global_groups, result, findings, extraction, new_ids)
+            models.extend(review_models)
+            apply_readiness_floor(result, state.get('logic_debug'))
     except AuditValidationError as error:
         logger.warning("Auditor post-review validation failed: %s", error)
         raise AuditorFailure("auditor_validation_failed") from None

@@ -373,14 +373,14 @@ def generate_pdf(result, output_path, *, executive=False):
         risks = sorted((d for d in retained if not needs_human_review(d)),
                        key=lambda d: (rank[d.final_severity], d.finding_id))
         for d in risks[:5]:
-            field(d.finding_id, f"{d.title[:140]} ({', '.join(d.requirement_ids[:6])}). {d.explanation[:180]}")
+            field(d.finding_id, f"{d.title} ({', '.join(d.requirement_ids)}). {d.explanation}")
         add("Приоритетные решения", "heading")
         for action in result.audit.priority_actions[:5]:
-            add(action[:300])
+            add(action)
         add("Ограничения анализа", "heading")
         add("Аудит охватывает извлечённые требования. Полнота и оценка ИИ требуют экспертной проверки.")
         for limitation in result.audit.limitations[:3]:
-            add(limitation[:240])
+            add(limitation)
         doc.build(story)
         return
 
@@ -444,12 +444,17 @@ def generate_pdf(result, output_path, *, executive=False):
     }
 
     retained.sort(
-        key=lambda d: severity_order[
+        key=lambda d: (needs_human_review(d), severity_order[
             d.final_severity
-        ]
+        ])
     )
 
+    current_group = None
     for decision in retained:
+        group = needs_human_review(decision)
+        if group != current_group:
+            add("Кандидаты для ручной проверки" if group else "Подтверждённые дефекты", "heading")
+            current_group = group
 
         original = original_findings[
             decision.finding_id

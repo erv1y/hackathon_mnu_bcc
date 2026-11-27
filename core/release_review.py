@@ -138,7 +138,7 @@ def finalize_review(extraction, consistency, audit, sections):
         while f'REVIEW-{n:03d}' in used: n+=1
         f.id=f'REVIEW-{n:03d}'; used.add(f.id); con.findings.append(f); new.append(f.id)
         result.decisions.append(AuditDecision(finding_id=f.id,decision='revised',final_severity=f.severity,
-            requirement_ids=f.requirement_ids,title=f.title,explanation=f.explanation,
+            requirement_ids=f.requirement_ids,title=f.title,explanation=f.explanation,assessment_kind='potential_risk',
             recommendation=f.recommendation,audit_reason='Добавлено после AI-аудита ограниченной программной проверкой; требует ручного подтверждения.',
             confidence=f.confidence,root_cause=f.title,scope='Один объект и функциональный процесс',final_evidence=f.evidence))
         if f.recommendation not in result.priority_actions: result.priority_actions.append(f.recommendation)
