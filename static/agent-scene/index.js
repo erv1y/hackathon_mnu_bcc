@@ -10,6 +10,7 @@ import { Pipeline, Doc } from "./behaviors/pipeline.js";
 import { QuickAgent } from "./behaviors/quick-work.js";
 import { Morph } from "./morph.js";
 import { Overlay } from "./overlay.js";
+import { ControlCenter } from "./control-center.js?v=1";
 import * as P from "./props.js";
 
 const MODE_KEY = "agentscene_mode_v1";
@@ -147,6 +148,7 @@ class AgentScene {
     this.raycaster = new THREE.Raycaster();
     this.resize();
     this.bind();
+    this.center = new ControlCenter(this, text);
     // Пара тиков, чтобы позы встали на места до первого кадра.
     for (let i = 0; i < 3; i += 1) this.tick(1 / 30);
     this.render();
@@ -366,6 +368,7 @@ class AgentScene {
   }
 
   onEvent(detail) {
+    this.center?.onEvent(detail);
     switch (detail.type) {
       case "mode": this.setMode(detail.mode); break;
       case "upload": this.onUpload(); break;
@@ -458,6 +461,7 @@ class AgentScene {
     this.inspect.replaceChildren(option(text("sceneInspect"), ""), ...actors.map((actor) =>
       option(text(actor.config.name) + " · " + text(actor.config.role), actor.key)));
     this.inspect.value = this.selectedAgent || "";
+    this.center?.render();
   }
 
   resize() {
@@ -489,6 +493,7 @@ class AgentScene {
   }
 
   selectAgent(key) {
+    this.center?.syncSelection();
     const hit = this.allActors.find((actor) => actor.key === key);
     this.allActors.forEach((actor) => actor.character.setHighlight(actor === hit ? 1 : 0));
     this.hoveredAgentId = hit?.key || null;

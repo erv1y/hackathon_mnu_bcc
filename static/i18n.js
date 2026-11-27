@@ -3,6 +3,26 @@
 // Интерфейсные тексты. Порядок значений: русский, қазақша, English.
 const LOCALES = { ru: "ru-RU", kk: "kk-KZ", en: "en-GB" };
 const UI_TEXT = {
+  centerTitle: ["Команда AI-агентов", "AI агенттер командасы", "AI agent team"],
+  centerFeed: ["Журнал анализа", "Талдау журналы", "Analysis activity"],
+  centerCount: ["Агентов: {n}", "Агенттер: {n}", "Agents: {n}"],
+  centerProgress: ["Этапы: {n}/{total}", "Кезеңдер: {n}/{total}", "Stages: {n}/{total}"],
+  centerIdle: ["Готов к запуску", "Іске қосуға дайын", "Ready to start"],
+  centerWaiting: ["Ожидает этапа", "Кезеңді күтуде", "Waiting"],
+  centerRunning: ["Анализирует", "Талдап жатыр", "Analyzing"],
+  centerRetry: ["Повторная попытка", "Қайта әрекет", "Retrying"],
+  centerDone: ["Этап завершён", "Кезең аяқталды", "Stage completed"],
+  centerReused: ["Восстановлен из контрольной точки", "Бақылау нүктесінен қалпына келтірілді", "Restored from checkpoint"],
+  centerLimited: ["Этап не завершён полностью", "Кезең толық аяқталмаған", "Stage incomplete"],
+  centerUnknown: ["Нет подтверждения завершения", "Аяқталуы расталмаған", "Completion not confirmed"],
+  centerStarted: ["Анализ запущен", "Талдау басталды", "Analysis started"],
+  centerDocument: ["Документ подготовлен", "Құжат дайындалды", "Document prepared"],
+  centerValidating: ["Проверка результата", "Нәтижені тексеру", "Validating result"],
+  centerPartial: ["Частичный отчёт получен", "Ішінара есеп алынды", "Partial report received"],
+  centerReport: ["Отчёт получен", "Есеп алынды", "Report received"],
+  centerError: ["Анализ прерван", "Талдау тоқтатылды", "Analysis interrupted"],
+  centerEmpty: ["Здесь появятся реальные события после запуска проверки.", "Тексеру басталғанда мұнда нақты оқиғалар пайда болады.", "Actual analysis events will appear here after you start a check."],
+
   sceneOffice: ["Офис", "Кеңсе", "Office"],
   sceneApartment: ["Квартира", "Пәтер", "Apartment"],
   findingAuditCounts: ["Замечания · проверено {reviewed} · предварительных {pending}", "Ескертулер · тексерілгені {reviewed} · алдын ала {pending}", "Findings · reviewed {reviewed} · preliminary {pending}"],

@@ -524,10 +524,11 @@ function handleEvent(event) {
     setWorkflowStep(event.key === "payments" ? 1 : event.key === "logic" ? 3 : 2);
     sceneEvent({ type: "agent_start", key: event.key });
   } else if (event.type === "agent_retry") {
+    sceneEvent({ type: "agent_retry", key: event.key });
     const item = [...$("agent-list").children].find((row) => row.dataset.key === event.key);
     if (item) item.lastChild.textContent = msg("agentRetry");
   } else if (event.type === "agent_done" || event.type === "agent_reused") {
-    sceneEvent({ type: "agent_done", key: event.key, ok: event.ok, code: event.code });
+    sceneEvent({ type: "agent_done", key: event.key, ok: event.ok, code: event.code, reused: event.type === "agent_reused" });
     const item = [...$("agent-list").children].find((row) => row.dataset.key === event.key);
     if (item) {
       item.className = `agent-item ${event.ok ? "done" : "failed"}`;
@@ -683,6 +684,7 @@ function setReport(audit, snapshot, saved = null) {
   state.comparison?.controller?.abort();
   state.comparison = null;
   state.audit = audit;
+  if (audit.mode !== "live" || saved) sceneEvent({ type: "center_reset" });
   state.auditorRetry = null;
   state.snapshot = snapshot;
   state.run = saved || (audit.auditor_failure ? null : registerRun(audit, snapshot));
