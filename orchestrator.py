@@ -20,7 +20,7 @@ from core.rule_engine import augment_consistency
 from core.counterexample import analyze_counterexamples
 from core.release_review import finalize_review
 from core.models import (ValidationResult, ExtractionResult, QualityAnalysisResult,
-                         ConsistencyAnalysisResult, AuditResult)
+                         ConsistencyAnalysisResult, AuditPatch, AuditResult)
 from core.advanced_report import generate_pdf
 from core.audit_metrics import audit_metrics, needs_human_review
 from core.run_metadata import tracked, now, revision, id_mapping
@@ -56,6 +56,7 @@ class DeepPartialRunResult(QuickValidationResult):
     source_files: list[str]
     execution_time_seconds: float
     independent_audit: Literal[False] = False
+    finding_audit: AuditPatch | None = None
     auditor_failure: Literal["auditor_validation_failed", "auditor_provider_failed", "consistency_incomplete"]
 
 
@@ -257,8 +258,6 @@ def auditor_node(state):
     extraction = ExtractionResult.model_validate(state['extraction'])
     quality = QualityAnalysisResult.model_validate(state['quality'])
     consistency = ConsistencyAnalysisResult.model_validate(state['consistency'])
-    if consistency.unresolved:
-        raise AuditorFailure('consistency_incomplete')
     result, models = tracked(timed_analysis, 'Auditor 2.0', audit_results, state['sections'], extraction, quality, consistency, state.get('logic_debug'))
     original_audit = result.model_dump(mode='json')
     try:
@@ -488,12 +487,20 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
                     quality=quality, consistency=consistency, auditor_failure=audit_failure.code)
             else:
                 result = result_from_state(state, time.perf_counter() - started, passport)
+                if result.consistency.unresolved:
+                    result = DeepPartialRunResult(
+                        passport=passport, source_files=result.source_files,
+                        execution_time_seconds=result.execution_time_seconds,
+                        extraction=result.extraction, quality=result.quality,
+                        consistency=result.consistency, auditor_failure="consistency_incomplete",
+                        finding_audit=AuditPatch(decisions=result.audit.decisions),
+                    )
     if isinstance(result, DeepRunResult):
         result.passport["audit_metrics"] = audit_metrics(result)
     result.passport['id_mapping'] = id_mapping(result.extraction.requirements, sections)
     if write_reports and mode == 'quick':
         save_json(result, 'quick_validation.json', folder)
-    elif write_reports and audit_failure:
+    elif write_reports and isinstance(result, DeepPartialRunResult):
         save_json(result, 'partial_validation.json', folder)
     elif write_reports:
         export_result(result, folder)
@@ -502,9 +509,9 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
         if state.get('logic_debug'):
             folder.mkdir(parents=True, exist_ok=True)
             (folder / 'formalization_debug.json').write_text(json.dumps(state['logic_debug'], ensure_ascii=False, indent=2), encoding='utf-8')
-    if audit_failure:
+    if isinstance(result, DeepPartialRunResult):
         emit_progress(progress_callback, 90, 'Auditor Failed', 'Независимый аудит не завершён.')
-        logger.warning("Partial Deep report: %s", audit_failure.code)
+        logger.warning("Partial Deep report: %s", result.auditor_failure)
     else:
         emit_progress(progress_callback, 90, 'Validation Complete', 'Все результаты готовы.')
         print('[GRAPH] Execution completed')

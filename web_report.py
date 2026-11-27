@@ -46,7 +46,9 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
     mappings = {row["report_id"]: row for row in result.passport["id_mapping"]}
     prepared = prepare_findings(result.quality, result.consistency)
     originals = {row["id"]: row for row in prepared}
-    decisions = {row.finding_id: row for row in result.audit.decisions} if audited else {}
+    finding_audit = result.audit if audited else getattr(result, "finding_audit", None)
+    decisions = {row.finding_id: row for row in finding_audit.decisions} if finding_audit is not None else {}
+    finding_audit_completed = finding_audit is not None
     timings = timings or {}
     anchors = anchors or {}
 
@@ -71,9 +73,9 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
                          elapsed_sec=timings.get(row["key"]))
         for row in agent_list(mode, language)
     }
-    if partial and result.auditor_failure == "consistency_incomplete":
+    if partial and result.consistency.unresolved:
         modules["security"].update(ok=False, error="consistency_incomplete", status_code=502)
-    if partial:
+    if partial and not finding_audit_completed:
         modules["logic"].update(ok=False, error=result.auditor_failure, status_code=502)
     for finding_id, original in originals.items():
         decision = decisions.get(finding_id)
@@ -158,8 +160,13 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
                   failed_agents=[k for k, module in modules.items() if not module["ok"]],
                   auditor_failure=result.auditor_failure if partial else None,
                   independent_audit=audited,
+                  analysis_completed=not partial and not bundle.warnings,
+                  document_coverage_complete=not partial and not bundle.warnings if deep else None,
+                  finding_audit_completed=finding_audit_completed,
+                  consistency_coverage_complete=not result.consistency.unresolved if deep else None,
+                  audited_finding_count=len(active) if finding_audit_completed else None,
                   pending_findings=len(findings) - len(active), readiness=readiness,
-                  confirmed_count=len(active) if audited else None, preliminary_count=None if audited else len(active),
+                  confirmed_count=len(active) if audited else None, preliminary_count=None if finding_audit_completed else len(active),
                   native=result.model_dump(mode="json"), source_warnings=list(bundle.warnings),
                   knowledge_graph=json.loads(graph_json(build_knowledge_graph(result))) if audited else None)
     report.pop("score_weights", None)

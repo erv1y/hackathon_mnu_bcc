@@ -2,6 +2,8 @@
 import re
 
 LABELS = {
+    "Незавершённые этапы проверки согласованности": ("Incomplete consistency phases", "Аяқталмаған сәйкестік кезеңдері"),
+    "Независимо проверенные замечания при неполном покрытии": ("Individually audited findings with incomplete coverage", "Қамтуы толық емес жеке тексерілген ескертулер"),
     "Проверка согласованности завершена частично.": ("Consistency review is incomplete.", "Сәйкестік тексеруі ішінара аяқталды."),
     "Deep Validation — частичный отчёт": ("Deep validation — partial report", "Терең тексеру — ішінара есеп"),
     "Quick Validation — предварительный отчёт": ("Quick validation — preliminary report", "Жедел тексеру — алдын ала есеп"),

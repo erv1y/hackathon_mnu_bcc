@@ -6,7 +6,7 @@ from collections import Counter
 from core.pdf_labels import pdf_label
 
 
-def generate_quick_pdf(result, output_path):
+def generate_quick_pdf(result, output_path, *, executive=False):
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.pagesizes import A4
@@ -39,7 +39,30 @@ def generate_quick_pdf(result, output_path):
     else:
         add(label('Quick Validation — предварительный отчёт'), heading)
         add(label('Один AI-агент. Независимый аудит не выполнялся. Результаты требуют проверки специалистом.'))
-    add('Документы: ' + ', '.join(result.source_files))
+    add(label("Документы") + ": " + ", ".join(result.source_files))
+    finding_audit = getattr(result, "finding_audit", None)
+    if finding_audit is not None:
+        add(label("Независимо проверенные замечания при неполном покрытии"), heading)
+        add(label("Незавершённые этапы проверки согласованности") + ": " + ", ".join(
+            sorted({entry["phase"] for entry in result.consistency.unresolved})))
+        for decision in finding_audit.decisions:
+            add(f"{decision.finding_id} | {decision.decision} | {decision.title}")
+            if decision.merged_into:
+                add(f"{label('Объединено с')} {decision.merged_into}")
+            if decision.decision in ("confirmed", "revised"):
+                add(decision.explanation)
+                add(decision.recommendation)
+                if not executive:
+                    for item in decision.final_evidence:
+                        add(f"{item.requirement_id} | {item.source} | {item.page or '—'} / {item.paragraph or '—'}")
+                        add(item.quote)
+        if not executive:
+            add(label("Реестр требований"), heading)
+            for requirement in result.extraction.requirements:
+                add(f"{requirement.id} | {requirement.source}")
+                add(requirement.text)
+        SimpleDocTemplate(str(path), pagesize=A4, title="Deep Validation - Partial").build(story)
+        return path
     add(f'Время текущего запуска: {result.execution_time_seconds} сек.')
     add(f'Требований: {len(result.extraction.requirements)}; замечаний качества: {sum(len(a.findings) for a in result.quality.assessments)}; замечаний согласованности: {len(result.consistency.findings)}. Эти категории могут пересекаться.')
     add(label('Реестр требований'), heading)

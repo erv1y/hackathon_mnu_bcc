@@ -182,7 +182,7 @@ def analyze_counterexamples(extraction, consistency, sections=None, debug=None):
                       candidate_count=len(candidates),candidate_ids=candidates,
                       complete=bool(pairs) and not unresolved and len(reviewed)==len(pairs))
     print(f'[PAIR COVERAGE] {len(reviewed)}/{len(pairs)} selected pairs reviewed by AI; {len(unresolved)} unresolved; {len(candidates)} candidates')
-    result = ConsistencyAnalysisResult(unresolved=consistency.unresolved,findings=findings,summary=consistency.summary+
+    result = ConsistencyAnalysisResult(repair_diagnostics=consistency.repair_diagnostics, unresolved=consistency.unresolved,findings=findings,summary=consistency.summary+
         f' | Прямой анализ: {len(reviewed)}/{len(pairs)} выбранных пар получили заключение AI; '
         f'{len(unresolved)} не разрешены; {len(candidates)} кандидатов. Всего возможных пар: {diagnostic["total_possible_pairs"]}. '
         'Не является доказательством полноты или отсутствия дефектов.')

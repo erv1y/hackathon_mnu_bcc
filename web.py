@@ -518,13 +518,19 @@ async def ask_document(
 
 @app.post("/api/audit/pdf")
 async def download_pdf(result: DeepRunResult | DeepPartialRunResult | QuickRunResult, executive: bool = False):
-    if executive and not isinstance(result, DeepRunResult):
+    finding_audit = getattr(result, "finding_audit", None)
+    if executive and not isinstance(result, DeepRunResult) and finding_audit is None:
         raise HTTPException(422, "Executive report requires a completed audit.")
     def render():
         with TemporaryDirectory(prefix="requiragents-pdf-") as folder:
             path = Path(folder) / "report.pdf"
             if isinstance(result, DeepRunResult):
                 validate_audit(result.audit, prepare_findings(result.quality, result.consistency), result.extraction)
+            if finding_audit is not None:
+                from core.quick_view import generate_quick_pdf as generate_partial_pdf
+                validate_audit(finding_audit, prepare_findings(result.quality, result.consistency), result.extraction)
+                generate_partial_pdf(result, path, executive=executive)
+                return path.read_bytes()
             generator = generate_pdf if isinstance(result, DeepRunResult) else generate_quick_pdf
             if executive:
                 generate_base_pdf(result, path, executive=True)

@@ -212,6 +212,8 @@ def main():
     output["not_started"] = [row["id"] for row in not_started]
     diagnostic["end_to_end_success_rate"] = round(completed / planned, 4) if planned else None
     if mode == "deep" and (failures or not_started) and planned:
+        diagnostic["full_document_coverage_rate"] = round(
+            sum(record["independently_audited"] for record in measured) / planned, 4)
         diagnostic["incomplete_audit_rate"] = round(
             (planned - sum(record["independently_audited"] for record in measured)) / planned, 4)
     planned_agents = sum(record["strict"]["agents_total"] for record in measured)

@@ -26,7 +26,9 @@ class StabilizationTests(unittest.TestCase):
         envelope = lambda rows: json.dumps({"findings": rows, "summary": "Reviewed"})
         first = envelope([good, bad])
         for repaired in (True, False):
-            correction = envelope([dict(bad, candidate_index=1, requirement_ids=["R1", "R2"])]) if repaired else envelope([])
+            resolution = dict(candidate_index=1, disposition="repaired", reason="Both source IDs support the candidate.",
+                              candidate=dict(bad, requirement_ids=["R1", "R2"]))
+            correction = json.dumps({"resolutions": [resolution] if repaired else [], "summary": "Reviewed"})
             with patch.object(consistency_analyst, "ask_gemini", side_effect=[first, correction, envelope([])]) as api:
                 result = consistency_analyst.analyze_consistency(extraction)
                 payload = json.loads(api.call_args_list[1].kwargs["prompt"])
@@ -86,3 +88,31 @@ class StabilizationTests(unittest.TestCase):
         payload = json.loads(api.call_args.kwargs["prompt"])
         self.assertEqual([row["id"] for row in payload["evidence_repairs"]["QUAL-001"]], ["R3"])
         self.assertEqual(audited.decisions[0].explanation, result.decisions[0].explanation)
+
+    def test_grounded_withdrawal_and_bad_indices_preserve_coverage_limit(self):
+        req = dict(id="R1", type="functional", text="Export the account statement.",
+                   source="fixture.md", paragraph=1)
+        extraction = ExtractionResult(requirements=[req])
+        candidate = dict(category="duplicate", severity="low", requirement_ids=["R1"],
+                         title="Duplicate report", explanation="Only one ID was provided.",
+                         impact="Repeated wording", recommendation="Check the obligation", confidence=.8)
+        good = dict(candidate, category="missing_dependency", title="Missing policy")
+        withdrawn = dict(candidate_index=0, disposition="withdrawn",
+                         reason="The only cited requirement contains no second obligation.",
+                         evidence=[dict(requirement_id="R1", quote=req["text"],
+                                        source=req["source"], paragraph=1)])
+        invalid = dict(withdrawn, candidate_index=42)
+        for resolutions, code in (([withdrawn], "withdrawn_candidate"),
+                                  ([invalid], "unresolved_candidates"),
+                                  ([withdrawn, withdrawn], "unresolved_candidates")):
+            with self.subTest(resolutions=resolutions):
+                responses = [dict(findings=[candidate, good], summary="Reviewed"),
+                             dict(resolutions=resolutions, summary="Repaired"),
+                             dict(findings=[], summary="No further findings")]
+                with patch.object(consistency_analyst, "ask_gemini",
+                                  side_effect=[json.dumps(response) for response in responses]):
+                    result = consistency_analyst.analyze_consistency(extraction)
+                self.assertEqual(result.unresolved[0]["code"], code)
+                self.assertEqual([row.category for row in result.findings], ["missing_dependency"])
+                self.assertEqual(any(row.get("disposition") == "withdrawn" for row in result.repair_diagnostics),
+                                 code == "withdrawn_candidate")

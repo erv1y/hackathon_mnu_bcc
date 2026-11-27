@@ -168,7 +168,8 @@ def diagnostic_case(case, report, decisions=None):
         "quote_authenticity": authentic,
         "duplicate_prediction_indices": sorted(duplicates),
         "diagnostic_counts": dict(row_metrics),
-        "independently_audited": report.get("independent_audit", False),
+        "independently_audited": report.get("independent_audit", False) and not report.get("partial", False),
+        "partially_audited": report.get("finding_audit_completed", False) and report.get("partial", False),
         "end_to_end_success": not report.get("partial") and not report["failed_agents"]
                                and report["coverage"]["agents_completed"] == report["coverage"]["agents_total"],
         "severity_confusion": {level: {actual: confusion[level, actual]
@@ -218,13 +219,18 @@ def aggregate(records):
     diagnostic["severity_confusion"] = matrix
     audited = Counter()
     preliminary = Counter()
+    individually_audited = Counter()
     model_usage = Counter()
     fallback_usage = Counter()
     stage_attempts = Counter()
     stage_seconds = Counter()
     stage_samples = Counter()
     for record in records:
-        destination = audited if record["independently_audited"] else preliminary
+        destination = (
+            audited if record["independently_audited"]
+            else individually_audited if record["partially_audited"]
+            else preliminary
+        )
         destination.update(record["diagnostic_counts"])
         passport = record["report"]["native"]["passport"]
         for call in passport.get("model_attempts", []):
@@ -245,6 +251,8 @@ def aggregate(records):
     deep = [r for r in records if r["report"]["native"]["passport"].get("mode") == "deep"
             or r["report"].get("mode") == "deep" or r["independently_audited"]]
     diagnostic.update(
+        partial_finding_audit_detection=detection(individually_audited, individually_audited["expected"]),
+        full_document_coverage_rate=_ratio(sum(r["independently_audited"] for r in deep), len(deep)),
         preliminary_semantic_detection=detection(preliminary, preliminary["expected"]),
         independently_audited_semantic_detection=detection(audited, m["expected"]),
         end_to_end_success_rate=_ratio(sum(r["end_to_end_success"] for r in records), len(records)),

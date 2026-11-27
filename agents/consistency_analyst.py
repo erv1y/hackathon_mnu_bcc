@@ -1,6 +1,7 @@
 """Two-pass consistency review; source evidence is materialized by Python."""
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel, Field
@@ -41,12 +42,16 @@ class ConsistencyCandidateResult(BaseModel):
     summary: str
 
 
-class IndexedCandidate(ConsistencyCandidate):
+class CandidateResolution(BaseModel):
     candidate_index: int
+    disposition: Literal["repaired", "withdrawn", "unresolved"]
+    reason: str
+    candidate: ConsistencyCandidate | None = None
+    evidence: list[FindingEvidence] = Field(default_factory=list)
 
 
 class ConsistencyRepair(BaseModel):
-    findings: list[IndexedCandidate]
+    resolutions: list[CandidateResolution]
     summary: str
 
 
@@ -166,6 +171,18 @@ def materialize(candidate, extraction):
     return validate_findings(ConsistencyAnalysisResult(findings=findings, summary=candidate.summary), extraction)
 
 
+def grounded_withdrawal(evidence, original_ids, registry):
+    if not original_ids or {item.requirement_id for item in evidence} != set(original_ids):
+        return False
+    for item in evidence:
+        source = registry[item.requirement_id]
+        if (item.source, item.page, item.paragraph) != (source.source, source.page, source.paragraph):
+            return False
+        if " ".join(item.quote.split()) != " ".join(source.text.split()):
+            return False
+    return True
+
+
 def analyze_consistency(extraction_result, sections=None):
     print('\n[AGENT 3] Consistency Analyst 2.0 started')
     requirements = extraction_result.requirements
@@ -176,6 +193,15 @@ def analyze_consistency(extraction_result, sections=None):
             'source_context': sections or []}
     passes = [('global', 'Compare obligations, scope, exceptions, definitions, dependencies, and duplicates.'),
               ('scenario', 'Construct concrete counterexamples: boundary and temporal cases, repeated events, state transitions, acceptance-test outcomes, and API contract behavior. Check the same conditions and all exceptions. Look independently for missed conflicts.')]
+    instruction += (
+        "\nPairwise contradiction, duplication and incompatible cross-requirement constraints need "
+        "two distinct relevant IDs. A single obligation can have a missing dependency or a scope issue. "
+        "Route single-obligation correctness, ambiguity and verifiability to quality review. "
+        "Never invent an ID or reclassify a claim without evidence."
+    )
+    requirements_by_id = {r.id: r for r in requirements}
+    categories = set(ConsistencyCandidate.model_fields["category"].annotation.__args__)
+    diagnostics = []
     all_findings = []
     unresolved = []
     pass_summaries = []
@@ -185,6 +211,7 @@ def analyze_consistency(extraction_result, sections=None):
         payload = {**base, 'pass': name, 'focus': focus}
         retained = {}
         pending = None
+        originals = {}
         summary = ""
         for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
@@ -197,43 +224,87 @@ def analyze_consistency(extraction_result, sections=None):
                 break
             try:
                 data = json.loads(clean_response(response))
-                rows = data["findings"]
+                rows = data["findings" if pending is None else "resolutions"]
                 if not isinstance(rows, list) or not isinstance(data.get("summary"), str):
                     raise ValueError("invalid envelope")
             except (ValueError, TypeError, KeyError):
+                diagnostics.append(dict(phase=name, attempt=attempt, code="invalid_envelope"))
                 logger.warning("Consistency phase=%s attempt=%d code=invalid_envelope", name, attempt)
                 continue
             summary = data["summary"] or summary
             previous = pending
             pending = {} if previous is None else dict(previous)
-            seen_indices = set()
+            indices = Counter(row.get("candidate_index") for row in rows
+                              if isinstance(row, dict) and type(row.get("candidate_index")) is int)
+            if previous is not None:
+                for slot in previous:
+                    if indices[slot] != 1:
+                        pending[slot] = "missing_resolution" if not indices[slot] else "duplicate_candidate_index"
+                        diagnostics.append(dict(phase=name, candidate_index=slot, attempt=attempt,
+                                                code=pending[slot], disposition="unresolved"))
             for index, row in enumerate(rows):
                 slot = index if previous is None else row.get("candidate_index") if isinstance(row, dict) else None
                 if type(slot) is not int or (previous is not None and slot not in previous):
+                    diagnostics.append(dict(phase=name, attempt=attempt, code="unexpected_candidate_index"))
                     continue
-                if slot in seen_indices:
-                    retained.pop(slot, None)
-                    pending[slot] = "duplicate_candidate_index"
+                if previous is not None and indices[slot] != 1:
                     continue
-                seen_indices.add(slot)
+                if previous is None:
+                    originals[slot] = row
+                original = originals[slot] if isinstance(originals[slot], dict) else {}
+                category = original.get("category")
+                refs = original.get("requirement_ids")
+                refs = [rid for rid in refs if isinstance(rid, str) and rid in requirements_by_id] if isinstance(refs, list) else []
+                event = dict(phase=name, candidate_index=slot, attempt=attempt,
+                             original_category=category if isinstance(category, str) and category in categories else None,
+                             requirement_ids=refs)
+                resolution = None
                 try:
-                    candidate = ConsistencyCandidate.model_validate(row)
+                    if previous is None:
+                        candidate = ConsistencyCandidate.model_validate(row)
+                    else:
+                        resolution = CandidateResolution.model_validate(row)
+                        if len(resolution.reason.strip()) < 12 or resolution.reason.strip().casefold() in {"not applicable", "cannot resolve"}:
+                            raise ValueError("invalid resolution reason")
+                        if resolution.disposition == "unresolved" and resolution.candidate is None:
+                            pending[slot] = "model_unresolved"
+                            diagnostics.append(dict(event, code=pending[slot], disposition="unresolved"))
+                            continue
+                        if resolution.disposition == "withdrawn" and resolution.candidate is None:
+                            # The quotation must cover the original references and match the
+                            # registry. A withdrawn slot still leaves a coverage limitation.
+                            if (previous[slot] != "two_distinct_requirements_needed"
+                                    or not grounded_withdrawal(resolution.evidence, refs, requirements_by_id)):
+                                raise ValueError("unsupported withdrawal")
+                            pending.pop(slot, None)
+                            unresolved.append(dict(phase=name, code="withdrawn_candidate",
+                                                   candidate_indices=[slot]))
+                            diagnostics.append(dict(event, code=previous[slot], disposition="withdrawn"))
+                            continue
+                        if resolution.disposition != "repaired" or resolution.candidate is None:
+                            raise ValueError("invalid disposition")
+                        candidate = resolution.candidate
                     result = materialize(ConsistencyCandidateResult(findings=[candidate], summary=""), extraction_result)
                 except ValueError as error:
                     code = "two_distinct_requirements_needed" if "two distinct" in str(error) else "invalid_candidate"
                     pending[slot] = code
+                    diagnostics.append(dict(event, code=code, disposition="unresolved"))
                     logger.warning("Consistency phase=%s attempt=%d candidate=%d code=%s", name, attempt, slot, code)
                 else:
                     retained[slot] = result.findings[0]
                     pending.pop(slot, None)
+                    if resolution:
+                        diagnostics.append(dict(event, code=previous[slot], disposition="repaired"))
             if not pending:
                 break
             payload["repair"] = {
                 "requested": [{"candidate_index": slot, "code": code,
-                               "candidate": rows[slot] if previous is None else None}
+                               "candidate": originals[slot]}
                               for slot, code in sorted(pending.items())],
-                "instruction": "Return only corrected requested candidates with their candidate_index and summary. "
-                               "Use existing source IDs. Preserve meaning and evidence. Omit candidates you cannot repair.",
+                "instruction": "Return exactly one resolution per requested candidate_index with a meaningful reason. "
+                               "Use repaired with a validated candidate, withdrawn only with source quotations "
+                               "showing why the original claim is unsupported, otherwise unresolved. "
+                               "Use existing source IDs and original coordinates.",
             }
         else:
             unresolved.append(dict(phase=name, code="unresolved_candidates" if pending else "invalid_envelope",
@@ -250,7 +321,7 @@ def analyze_consistency(extraction_result, sections=None):
     summary = (f'Выполнены общий и сценарный анализы. Сохранено {len(all_findings)} '
                'кандидатов замечаний до аудита. Совпадающие по смыслу замечания могут потребовать объединения. '
                'Комментарии AI (не отдельные подтверждённые замечания): ' + ' | '.join(pass_summaries))
-    result = validate_findings(ConsistencyAnalysisResult(findings=all_findings, summary=summary if not unresolved else "Consistency coverage incomplete.", unresolved=unresolved), extraction_result)
+    result = validate_findings(ConsistencyAnalysisResult(findings=all_findings, summary=summary if not unresolved else "Consistency coverage incomplete.", unresolved=unresolved, repair_diagnostics=diagnostics), extraction_result)
     print(f'[AGENT 3] Found {len(result.findings)} consistency issues')
     print('[VALIDATOR] Evidence validation passed')
     return result

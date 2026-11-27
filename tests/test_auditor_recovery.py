@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import pymupdf
 
 from agents import auditor
-from core.models import AuditResult, ConsistencyAnalysisResult, ExtractionResult, QualityAnalysisResult
+from core.models import AuditResult, ConsistencyAnalysisResult, ExtractionResult, FindingEvidence, QualityAnalysisResult
 import orchestrator
 import web
 from web_engine import AuditRetries
@@ -112,14 +112,48 @@ class AuditorRecoveryTests(unittest.TestCase):
             self.assertEqual(len(list((self.root / "checkpoints").glob("*.sqlite"))), 1)
             self.assert_recovered(self.stream(cache="true"))
 
-    def test_incomplete_consistency_keeps_quality_and_never_starts_model_audit(self):
+    def test_incomplete_consistency_still_audits_findings_without_readiness(self):
         self.consistency.unresolved = [{"phase": "global", "code": "unresolved_candidates", "candidate_indices": [2]}]
-        with patch.object(orchestrator, "audit_results") as audit:
+        with patch.object(auditor, "ask_gemini", return_value=self.result.model_dump_json()) as audit:
             events = self.stream()
-        audit.assert_not_called()
+        audit.assert_called_once()
         report = events[-1]
         self.assertEqual(report["auditor_failure"], "consistency_incomplete")
-        self.assertEqual(report["preliminary_count"], 1)
-        self.assertEqual(report["failed_agents"], ["security", "logic"])
+        self.assertIsNone(report["preliminary_count"])
+        self.assertEqual(report["audited_finding_count"], 0)
+        self.assertTrue(report["finding_audit_completed"])
+        self.assertFalse(report["independent_audit"])
+        self.assertIsNone(report["readiness"])
+        self.assertIsNone(report["score"])
+        self.assertEqual(report["failed_agents"], ["security"])
+        self.assertNotIn("readiness", report["native"]["finding_audit"])
+        for url in ("/api/audit/pdf", "/api/audit/pdf?executive=true"):
+            pdf = self.http.post(url, json=report["native"])
+            self.assertEqual(pdf.status_code, 200)
+            with pymupdf.open(stream=pdf.content) as document:
+                text = " ".join(document[0].get_text().split())
+                self.assertIn("Готовность не оценена", text)
+                self.assertIn("Независимо проверенные замечания", text)
         self.assertNotIn("auditor_retry", report)
         self.assertEqual(report["native"]["consistency"]["unresolved"][0]["candidate_indices"], [2])
+
+    def test_partial_finding_audit_can_merge_duplicates(self):
+        self.consistency.unresolved = [{"phase": "scenario", "code": "unresolved_candidates",
+                                        "candidate_indices": [0]}]
+        findings = self.quality.assessments[0].findings
+        findings.append(findings[0].model_copy())
+        row = self.result.decisions[0]
+        row.decision, row.final_severity = "confirmed", "medium"
+        row.root_cause, row.scope = "Same deadline concern", "Settlement"
+        row.final_evidence = [FindingEvidence(requirement_id="R1", quote=TEXT,
+                                              source="specification.md", paragraph=1)]
+        self.result.decisions.append(row.model_copy(update={
+            "finding_id": "QUAL-002", "decision": "merged", "final_severity": None,
+            "merged_into": row.finding_id,
+        }))
+        with patch.object(auditor, "ask_gemini", return_value=self.result.model_dump_json()):
+            report = self.stream()[-1]
+        self.assertTrue(report["partial"])
+        self.assertEqual(report["audited_finding_count"], 1)
+        self.assertEqual(report["merged_duplicates"], 1)
+        self.assertEqual(report["native"]["finding_audit"]["decisions"][1]["merged_into"], "QUAL-001")

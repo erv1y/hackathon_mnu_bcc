@@ -729,6 +729,10 @@ function renderReport() {
   const messages = [...audit.source_warnings];
   if (audit.auditor_failure) {
     messages.push(msg(auditorFailureKey(audit.auditor_failure)), msg("auditPartialStatus"));
+    if (audit.consistency_coverage_complete === false && audit.auditor_failure !== "consistency_incomplete") {
+      messages.push(msg("consistencyIncomplete"));
+    }
+    if (audit.finding_audit_completed) messages.push(msg("partialFindingAudit"));
   } else if (audit.failed_agents.length) {
     const failed = audit.modules.filter((module) => !module.ok).map((module) => module.title).join(", ");
     messages.push(done ? msg("failedModules", { modules: failed }) : msg("reviewFailed"));
@@ -759,10 +763,10 @@ function readinessText(report) {
 function renderNativeTrace(audit) {
   show($("native-status"), Boolean(audit.native),
     `${readinessText(audit)} · ${audit.elapsed_sec} s · ${audit.native?.passport.run_kind || ""}`);
-  show($("executive-pdf-btn"), Boolean(audit.native && audit.independent_audit));
+  show($("executive-pdf-btn"), Boolean(audit.native && (audit.independent_audit || audit.finding_audit_completed)));
   show($("native-pdf-btn"), Boolean(audit.native));
   const decisionKeys = {confirmed: "auditConfirmed", revised: "auditRevised", merged: "auditMerged", rejected: "auditRejected"};
-  const decisions = audit.native?.audit?.decisions || [];
+  const decisions = audit.native?.audit?.decisions || audit.native?.finding_audit?.decisions || [];
   show($("native-audit"), decisions.length > 0);
   $("native-audit-content").replaceChildren(...decisions.map((decision) => {
     const row = element("li", "document-summary");

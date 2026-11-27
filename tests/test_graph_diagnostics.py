@@ -95,3 +95,20 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(metrics["fallback_model_attempts"], {"backup": 1})
         self.assertEqual(metrics["stage_api_attempts"], {"auditor": 1})
         self.assertNotIn("secret", json.dumps(records))
+
+    def test_partial_finding_audit_never_inflates_full_document_recall(self):
+        completed = report(finding())
+        completed.update(independent_audit=True)
+        partial = report(finding())
+        partial.update(partial=True, finding_audit_completed=True, failed_agents=["security"])
+        partial["native"]["passport"]["mode"] = "deep"
+        preliminary = report(finding())
+        preliminary.update(partial=True, failed_agents=["logic"])
+        preliminary["native"]["passport"]["mode"] = "deep"
+        records = [diagnostic_case(case(), row) for row in (completed, partial, preliminary)]
+        metrics = aggregate(records)[1]
+        self.assertEqual(metrics["partial_finding_audit_detection"]["matched"], 1)
+        self.assertEqual(metrics["preliminary_semantic_detection"]["matched"], 1)
+        self.assertEqual(metrics["independently_audited_semantic_detection"]["expected"], 3)
+        self.assertEqual(metrics["independently_audited_semantic_detection"]["recall"], 0.3333)
+        self.assertEqual(metrics["full_document_coverage_rate"], 0.3333)
