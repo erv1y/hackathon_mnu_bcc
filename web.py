@@ -27,6 +27,8 @@ from core.llm_client import API_KEY, MODEL_NAME
 from web_engine import analyze, upload_name
 from web_report import CRITERIA, agent_list
 from tempfile import TemporaryDirectory
+from agents.auditor import prepare_findings, validate_audit
+from core.report_generator import generate_pdf as generate_base_pdf
 from core.advanced_report import generate_pdf, generate_quick_pdf
 from orchestrator import DeepPartialRunResult, DeepRunResult, QuickRunResult  # noqa: E402
 
@@ -515,12 +517,19 @@ async def ask_document(
 
 
 @app.post("/api/audit/pdf")
-async def download_pdf(result: DeepRunResult | DeepPartialRunResult | QuickRunResult):
+async def download_pdf(result: DeepRunResult | DeepPartialRunResult | QuickRunResult, executive: bool = False):
+    if executive and not isinstance(result, DeepRunResult):
+        raise HTTPException(422, "Executive report requires a completed audit.")
     def render():
         with TemporaryDirectory(prefix="requiragents-pdf-") as folder:
             path = Path(folder) / "report.pdf"
+            if isinstance(result, DeepRunResult):
+                validate_audit(result.audit, prepare_findings(result.quality, result.consistency), result.extraction)
             generator = generate_pdf if isinstance(result, DeepRunResult) else generate_quick_pdf
-            generator(result, path)
+            if executive:
+                generate_base_pdf(result, path, executive=True)
+            else:
+                generator(result, path)
             return path.read_bytes()
 
     try:

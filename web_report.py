@@ -6,6 +6,7 @@ from statistics import mean
 
 from agents.auditor import prepare_findings
 from analyzer import build_result
+from core.audit_metrics import audit_metrics, needs_human_review
 from core.knowledge_graph import build_knowledge_graph, graph_json
 from document_review import _fix_plan
 from orchestrator import DeepPartialRunResult, DeepRunResult
@@ -82,13 +83,19 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
         if isinstance(evidence, str):
             req = requirements[original["requirement_id"]]
             evidence = [dict(source=req.source, quote=evidence, page=req.page, paragraph=req.paragraph)]
-        proofs = [p for item in evidence
-                  if (p := point(item["source"], item["quote"], item.get("page"), item.get("paragraph")))]
-        candidate = finding_id.startswith("REVIEW-")
+        proofs = []
+        for item in evidence:
+            proof = point(item["source"], item["quote"], item.get("page"), item.get("paragraph"))
+            if proof:
+                proofs.append(dict(proof, requirement_id=item.get("requirement_id") or ids[0]))
+        candidate = needs_human_review(decision) if decision else finding_id.startswith("REVIEW-")
         reason = "human_review" if candidate else None
+        if decision and decision.assessment_kind != "defect":
+            reason = "audit_question" if decision.assessment_kind == "question" else "potential_risk"
         criterion = original.get("category") or original["criterion"]
         recommendation = decision.recommendation if decision else original["recommendation"]
-        row = dict(id=finding_id, title=(decision.title if decision else original.get("title")) or criterion,
+        recommendation = recommendation.removeprefix("REWRITE:").strip()
+        row = dict(action_kind=decision.action_kind if decision else "clarify", id=finding_id, title=(decision.title if decision else original.get("title")) or criterion,
                    severity=severity, criterion_id=criterion, criterion={"id": criterion, "title": criterion},
                    requirement_ids=ids, evidence=proofs, quote=proofs[0]["text"] if proofs else "",
                    issue=decision.explanation if decision else original["explanation"], suggestion=recommendation,
@@ -103,9 +110,9 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
                    and proofs[0]["text"] == requirements[ids[0]].text
                    and "\n" not in recommendation and "\n" not in proofs[0]["text"]
                    and bundle.sources[positions[requirements[ids[0]].source]].text.count(proofs[0]["text"]) == 1
-                   and recommendation.startswith("REWRITE: "))
+                   and decision and decision.action_kind == "rewrite")
         if rewrite:
-            row.update(suggestion=recommendation.removeprefix("REWRITE: ").strip(), fix_kind="rewrite")
+            row["fix_kind"] = "rewrite"
         row["fix"] = _fix_plan(row)
         key = "quick" if not deep else "kyc_aml" if original.get("agent") == "quality_analyst" else "security"
         modules[key]["defects"].append(row)
@@ -126,7 +133,7 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
             "status": "risk" if any(not row["review_reason"] for row in linked) else "review" if linked else "clear",
             "assessment": assessment.model_dump(),
         })
-    score = round(mean(row.quality_score for row in assessments.values())) if assessments and not bundle.warnings and not partial else None
+    score = round(mean(row.quality_score for row in assessments.values()), 1) if assessments and not bundle.warnings and not partial else None
     counts = {severity: distribution[severity] for severity in SEVERITIES}
     readiness = result.audit.readiness if audited else None
     if readiness == "ready" and bundle.warnings:
@@ -144,6 +151,12 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
                   confirmed_count=len(active) if audited else None, preliminary_count=None if audited else len(active),
                   native=result.model_dump(mode="json"), source_warnings=list(bundle.warnings),
                   knowledge_graph=json.loads(graph_json(build_knowledge_graph(result))) if audited else None)
+    report.pop("score_weights", None)
+    report.pop("score_penalty", None)
+    report.update(score_formula="mean(requirement_quality_scores)", merged_duplicates=sum(
+        row.decision == "merged" for row in decisions.values()))
+    if audited:
+        report.update(audit_metrics(result))
     report["document"]["requirements"] = report.pop("native_requirements", [])
     report["insights"] = build_insights(bundle, findings, settings.profile, mode, language)
     report["coverage"].update(agents_completed=sum(module["ok"] for module in modules.values()), agents_total=len(modules),

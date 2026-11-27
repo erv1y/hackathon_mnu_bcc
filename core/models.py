@@ -137,6 +137,8 @@ class AuditDecision(BaseModel):
     recommendation: str
     audit_reason: str
 
+    assessment_kind: Literal["defect", "question", "potential_risk"] = "defect"
+    action_kind: Literal["rewrite", "clarify", "business_decision"] = "clarify"
     merged_into: str | None = None
 
     confidence: float = Field(ge=0, le=1)

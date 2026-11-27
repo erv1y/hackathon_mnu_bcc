@@ -3,6 +3,7 @@ No API calls, no dependency on previous AI verdicts, no fixed requirement IDs.
 """
 import re
 from collections import Counter
+from core.audit_metrics import needs_human_review
 from core.models import AuditDecision, ConsistencyFinding, FindingEvidence
 
 MONTHS = ('январь январе января январский', 'февраль феврале февраля февральский',
@@ -147,8 +148,10 @@ def finalize_review(extraction, consistency, audit, sections):
     counts=Counter(d.final_severity for d in retained); statuses=Counter(d.decision for d in result.decisions)
     if counts['high'] or counts['critical']: result.readiness='not_ready'
     elif retained and result.readiness=='ready': result.readiness='conditionally_ready'
-    result.executive_summary=(f'Статус: {result.readiness}. Сохранено замечаний: {len(retained)} '
+    confirmed = [d for d in retained if not needs_human_review(d)]
+    counts = Counter(d.final_severity for d in confirmed)
+    result.executive_summary=(f'Статус: {result.readiness}. Сохранено замечаний: {len(confirmed)} '
         f'(critical: {counts["critical"]}, high: {counts["high"]}, medium: {counts["medium"]}, low: {counts["low"]}). '
         f'Объединено: {statuses["merged"]}; отклонено: {statuses["rejected"]}. '
-        f'Включены {sum(d.finding_id.startswith("REVIEW-") for d in retained)} программных кандидатов для ручного подтверждения. Полнота не гарантирована.')
+        f'Отдельно отмечены {sum(needs_human_review(d) for d in retained)} кандидатов для ручного подтверждения. Полнота не гарантирована.')
     return con,result,{'added_review_ids':new,'restored_group_evidence':added_evidence,'limitations':LIMITATION}

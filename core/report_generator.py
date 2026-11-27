@@ -21,6 +21,7 @@ from reportlab.platypus import (
     PageBreak
 )
 
+from core.audit_metrics import audit_metrics, needs_human_review
 from core.models import ValidationResult
 from agents.auditor import prepare_findings
 
@@ -93,7 +94,7 @@ def register_fonts():
     )
 
 
-def generate_pdf(result, output_path):
+def generate_pdf(result, output_path, *, executive=False):
 
     register_fonts()
 
@@ -244,9 +245,8 @@ def generate_pdf(result, output_path):
         if d.decision in ("confirmed", "revised")
     ]
 
-    severity_counts = Counter(
-        d.final_severity for d in retained
-    )
+    metrics_data = audit_metrics(result)
+    severity_counts = {key.lower(): value for key, value in metrics_data["counts"].items()}
 
     decision_counts = Counter(
         d.decision for d in result.audit.decisions
@@ -265,22 +265,12 @@ def generate_pdf(result, output_path):
         )
     }
 
-    quality_scores = [
-        a.quality_score
-        for a in result.quality.assessments
-    ]
-
-    average_score = (
-        sum(quality_scores) / len(quality_scores)
-        if quality_scores else 0
-    )
-
     # SECTION 1: EXECUTIVE DASHBOARD
 
     add("AI REQUIREMENTS VALIDATOR", "small")
 
     add(
-        "Отчёт о качестве технического задания",
+        "Краткий отчёт для руководителя" if executive else "Отчёт о качестве технического задания",
         "title"
     )
 
@@ -308,7 +298,7 @@ def generate_pdf(result, output_path):
         [
             [
                 paragraph(len(requirements), "metric"),
-                paragraph(len(retained), "metric"),
+                paragraph(metrics_data["unique_findings"], "metric"),
                 paragraph("4", "metric")
             ],
             [
@@ -351,8 +341,8 @@ def generate_pdf(result, output_path):
     )
 
     field(
-        "Средняя оценка Agent 2 до аудита",
-        f"{average_score:.1f}/100"
+        "Оценка качества требований до аудита",
+        f'{metrics_data["score"]}/100' if metrics_data["score"] is not None else "—"
     )
 
     field(
@@ -372,6 +362,28 @@ def generate_pdf(result, output_path):
         "small"
     )
 
+    field("Кандидаты для ручной проверки", metrics_data["human_review"])
+    if executive:
+        passport = result.passport
+        field("Настроенная модель", passport.get("configured_model", "—"))
+        field("Запуск / режим", f"{passport.get('run_kind', '—')} / {passport.get('mode', '—')}")
+        story.append(PageBreak())
+        add("Основные риски", "heading")
+        rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        risks = sorted((d for d in retained if not needs_human_review(d)),
+                       key=lambda d: (rank[d.final_severity], d.finding_id))
+        for d in risks[:5]:
+            field(d.finding_id, f"{d.title[:140]} ({', '.join(d.requirement_ids[:6])}). {d.explanation[:180]}")
+        add("Приоритетные решения", "heading")
+        for action in result.audit.priority_actions[:5]:
+            add(action[:300])
+        add("Ограничения анализа", "heading")
+        add("Аудит охватывает извлечённые требования. Полнота и оценка ИИ требуют экспертной проверки.")
+        for limitation in result.audit.limitations[:3]:
+            add(limitation[:240])
+        doc.build(story)
+        return
+
     # SECTION 2: SUMMARY AND ACTIONS
 
     story.append(PageBreak())
@@ -380,7 +392,8 @@ def generate_pdf(result, output_path):
 
     add(
         f"По итогам аудита сохранено "
-        f"{len(retained)} замечаний, включая "
+        f'{metrics_data["unique_findings"]} замечаний'
+        f", включая "
         f"{severity_counts['critical']} критических "
         f"и {severity_counts['high']} высоких."
     )
@@ -541,11 +554,11 @@ def generate_pdf(result, output_path):
 
         field(
             "Обоснование аудитора",
-            decision.audit_reason
+            ("Требует ручной проверки. " if needs_human_review(decision) else "") + decision.audit_reason
         )
 
         field(
-            "Уверенность AI",
+            "Некалиброванная оценка ИИ",
             f"{decision.confidence * 100:.0f}%"
         )
 

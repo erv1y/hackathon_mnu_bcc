@@ -73,3 +73,14 @@ test("3D pipeline retains the failed status and renders a partial result", () =>
   assert.deepEqual(states, ["partial"]);
   assert.equal(chips.at(-1), "auditPartialStatus");
 });
+
+test("the High dashboard card counts only audited High findings", () => {
+  const history = readFileSync(require.resolve("../static/history.js"), "utf8");
+  const context = vm.createContext({});
+  vm.runInContext(history.slice(history.indexOf("function auditCounts("), history.indexOf("function renderDashboard(")), context);
+  const counts = context.auditCounts({native: {}, scored_counts: {Critical: 2, High: 7},
+    score: 86.2, document: {requirements: []}});
+  assert.equal(counts.high, 7);
+  assert.equal(counts.findings, 9);
+  assert.match(app, /\$\("high-val"\)\.textContent = counts\.high/);
+});

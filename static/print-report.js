@@ -17,7 +17,7 @@ function printReport() {
     new Date(audit.created_at).toLocaleString(LOCALES[audit.language]),
   ].join(" · ")));
   const metrics = element("dl", "print-metrics");
-  for (const [label, value] of [["score", counts.score], ["High", counts.critical],
+  for (const [label, value] of [[audit.native ? "qualityEstimate" : "score", counts.score], ["High", counts.high],
     ["findingsTotal", counts.findings], ["requirementCount", counts.requirements]]) {
     const cell = element("div");
     cell.append(element("dt", "", t(label)), element("dd", "", value));

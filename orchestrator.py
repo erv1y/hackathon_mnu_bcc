@@ -22,6 +22,7 @@ from core.release_review import finalize_review
 from core.models import (ValidationResult, ExtractionResult, QualityAnalysisResult,
                          ConsistencyAnalysisResult, AuditResult)
 from core.advanced_report import generate_pdf
+from core.audit_metrics import audit_metrics, needs_human_review
 from core.run_metadata import tracked, now, revision, id_mapping
 from core.llm_client import MODEL_NAME, FALLBACK_MODELS, request_context, request_metrics, request_retry
 from agents.quick_validator import quick_validate, QuickValidationResult
@@ -166,6 +167,21 @@ def normalize_audit(quality, consistency, audit):
     for d in audit.decisions:
         if d.decision == 'confirmed' and d.final_severity != originals[d.finding_id]['severity']:
             d.decision = 'revised'
+        original = originals[d.finding_id]
+        d.recommendation = d.recommendation.removeprefix("REWRITE:").strip()
+        if original.get("category") in {"contradiction", "inconsistent_constraint", "scope_conflict"}:
+            d.action_kind = "business_decision"
+        if d.action_kind == "business_decision":
+            refs = ", ".join(d.requirement_ids)
+            d.recommendation = f"Владельцу требований согласовать правило ({refs}) по замечанию «{d.title}» и зафиксировать критерии приёмки."
+        if d.action_kind == "rewrite":
+            # Permit whitespace-only rewrites; any substantive edit needs explicit review.
+            if len(d.final_evidence) != 1 or d.recommendation.split() != d.final_evidence[0].quote.split():
+                d.action_kind = "clarify"
+    impact = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    retained = sorted((d for d in audit.decisions if d.decision in ("confirmed", "revised") and not needs_human_review(d)),
+                      key=lambda d: (impact[d.final_severity], d.action_kind != "business_decision", d.finding_id))
+    audit.priority_actions = list(dict.fromkeys(d.recommendation for d in retained))[:8]
     return audit
 
 
@@ -432,6 +448,8 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
                     quality=quality, consistency=consistency, auditor_failure=audit_failure.code)
             else:
                 result = result_from_state(state, time.perf_counter() - started, passport)
+    if isinstance(result, DeepRunResult):
+        result.passport["audit_metrics"] = audit_metrics(result)
     result.passport['id_mapping'] = id_mapping(result.extraction.requirements, sections)
     if write_reports and mode == 'quick':
         save_json(result, 'quick_validation.json', folder)

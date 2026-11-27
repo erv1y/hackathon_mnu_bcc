@@ -149,6 +149,8 @@ def analyze(items, settings, language, mode, context, max_chars, emit, *, use_ca
                                     node_callback=on_node, write_reports=False, use_cache=use_cache,
                                     memory_checkpoint=memory_checkpoint)
         if bundle.warnings and hasattr(result, "audit"):
+            result.passport["source_warnings"] = list(bundle.warnings)
+            result.passport["audit_metrics"]["score"] = None
             result.audit.limitations.extend(bundle.warnings)
             if result.audit.readiness == "ready":
                 result.audit.readiness = "conditionally_ready"

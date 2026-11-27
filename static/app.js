@@ -706,7 +706,7 @@ function renderReport() {
   const counts = auditCounts(audit);
   $("score-val").textContent = counts.score;
   $("score-status").textContent = msg(local ? "ruleScoreNote" : quick && status === "clearStatus" ? "noQuickCritical" : extraRisks && status === "clearStatus" ? "reviewStatus" : status);
-  $("high-val").textContent = counts.critical;
+  $("high-val").textContent = counts.high;
   $("total-val").textContent = counts.findings;
   $("requirements-val").textContent = counts.requirements;
   const totalFiles = audit.document.files?.length;
@@ -758,13 +758,16 @@ function readinessText(report) {
 function renderNativeTrace(audit) {
   show($("native-status"), Boolean(audit.native),
     `${readinessText(audit)} · ${audit.elapsed_sec} s · ${audit.native?.passport.run_kind || ""}`);
+  show($("executive-pdf-btn"), Boolean(audit.native && audit.independent_audit));
   show($("native-pdf-btn"), Boolean(audit.native));
   const decisionKeys = {confirmed: "auditConfirmed", revised: "auditRevised", merged: "auditMerged", rejected: "auditRejected"};
   const decisions = audit.native?.audit?.decisions || [];
   show($("native-audit"), decisions.length > 0);
   $("native-audit-content").replaceChildren(...decisions.map((decision) => {
     const row = element("li", "document-summary");
-    const status = decision.finding_id.startsWith("REVIEW-") ? msg("human_review") : msg(decisionKeys[decision.decision]);
+    const status = decision.assessment_kind === "question" ? msg("audit_question")
+      : decision.assessment_kind === "potential_risk" ? msg("potential_risk")
+      : decision.finding_id.startsWith("REVIEW-") ? msg("human_review") : msg(decisionKeys[decision.decision]);
     row.append(element("strong", "", `${decision.finding_id} · ${status} · ${decision.title}`),
       element("p", "", decision.audit_reason),
       element("p", "hint", [...decision.requirement_ids, decision.merged_into].filter(Boolean).join(" · ")));
@@ -830,7 +833,7 @@ function renderNativeTrace(audit) {
 
 function scoreExplanation(audit, language = state.language) {
   if (audit.auditor_failure) return msg("auditPartialStatus", {}, language);
-  if (audit.native) return msg("qualityEstimate", {}, language);
+  if (audit.native) return msg("qualityFormula", {}, language);
   if (audit.mode === "rules") return msg("ruleScoreExplanation", {}, language);
   const weights = SEVERITIES.map((severity) =>
     `${levelName(severity, language)}: ${audit.scored_counts[severity] ?? 0} × ${audit.score_weights[severity] ?? 0}`).join(" · ");
@@ -952,9 +955,9 @@ function makeEvidence(defect) {
   const evidence = element("div", "evidence-list");
   for (const fragment of defect.evidence) {
     const quote = element("div", "quote-box");
-    const label = element("div", "quote-heading", lineLabel(fragment));
+    const label = element("div", "quote-heading", [fragment.requirement_id, lineLabel(fragment)].filter(Boolean).join(" · "));
     const requirement = state.audit.document.requirements.find((item) =>
-      item.start < fragment.end && fragment.start < item.end);
+      fragment.requirement_id ? item.id === fragment.requirement_id : item.start < fragment.end && fragment.start < item.end);
     if (requirement) {
       label.append(button("link-btn", msg("findQuote"), () => openRequirement(requirement.id)));
     }
@@ -1001,7 +1004,7 @@ function makeCard(defect) {
     if (field === "suggestion") {
       const fix = element("div", "fix-box");
       const heading = element("div", "fix-head");
-      heading.append(element("strong", "", msg(defect.fix.kind === "clarify" ? "clarificationNeeded" : "howFix")));
+      heading.append(element("strong", "", msg(defect.action_kind === "business_decision" ? "businessDecision" : defect.fix.kind === "clarify" ? "clarificationNeeded" : "howFix")));
       if (!defect.review_reason) heading.append(button("btn-mini", msg("copy"), () => copyText(defect.suggestion)));
       fix.append(heading, element("p", "fix-text", defect.suggestion));
       card.append(fix);
@@ -1052,7 +1055,7 @@ function buildMarkdown() {
   const t = (key, values) => msg(key, values, audit.language);
   const lines = [
     `# ${markdownText(audit.report_format.title)}`, "",
-    `- ${t(reportMode(audit) === "quick" ? "quickScore" : "criteriaScore")} · ${audit.score === null ? "—" : audit.score + "/100"}`,
+    `- ${t(audit.native ? "qualityEstimate" : reportMode(audit) === "quick" ? "quickScore" : "criteriaScore")} · ${audit.score === null ? "—" : audit.score + "/100"}`,
     `- ${t("chooseMode")} · ${t(checkModeKey(reportMode(audit)))}`,
     `- ${t("reportVersion")}: ${markdownText(audit.profile.title)} v${audit.profile.version} / ${audit.profile.fingerprint.slice(0, 10)}`,
     `- ${t("date")}: ${new Date(audit.created_at).toLocaleString(LOCALES[audit.language])}`,
@@ -1086,7 +1089,7 @@ function buildMarkdown() {
       if (field === "criterion" && defect.criterion) {
         lines.push(`- ${t("rule")}: ${markdownText(defect.criterion.title)} (${defect.criterion.id})`,
         );
-        if (audit.mode !== "rules") lines.push(`- ${t("penalty", { n: defect.score_points })}`);
+        if (audit.mode !== "rules" && !audit.native) lines.push(`- ${t("penalty", { n: defect.score_points })}`);
       }
       if (field === "contributors") lines.push(`- ${t("checkedBy")}: ${markdownText([defect.module, ...defect.also_by].join(", "))}`);
       if (field === "references" && defect.references.length) {
@@ -1168,13 +1171,14 @@ function bindAuditControls() {
     const visible = findings().filter((item) => !item.review_reason && state.severity.has(item.severity)).sort(sortedBySeverity);
     if (visible.length) copyText(visible.map((item) => `${item.title}\n${item.suggestion}`).join("\n\n"));
   });
-  $("native-pdf-btn").addEventListener("click", async () => {
+  for (const id of ["native-pdf-btn", "executive-pdf-btn"]) $(id).addEventListener("click", async () => {
     try {
-      const response = await fetch("/api/audit/pdf", {method: "POST",
+      const response = await fetch("/api/audit/pdf" + (id === "executive-pdf-btn" ? "?executive=true" : ""), {method: "POST",
         headers: {...authHeaders(), "Content-Type": "application/json"},
         body: JSON.stringify(state.audit.native)});
       if (!response.ok) throw new Error(await responseError(response));
-      download(await response.blob(), "application/pdf", "pdf");
+      download(await response.blob(), "application/pdf", "pdf",
+        id === "executive-pdf-btn" ? "requiragents-executive" : state.audit.report_format.filename);
     } catch (failure) {
       error(failure.message);
     }

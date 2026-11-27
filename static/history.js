@@ -81,7 +81,7 @@ function auditCounts(report) {
   return {
     score: report.score === null ? "—" : `${report.score} / 100`,
     findings: Object.values(counts).reduce((count, value) => count + value, 0),
-    critical: (counts.Critical || 0) + (report.native ? 0 : counts.High || 0),
+    high: counts.High || 0,
     requirements: report.document.requirements.length,
   };
 }
@@ -90,7 +90,7 @@ function renderDashboard(demo = null) {
   const runs = readRecentRuns();
   const latest = runs[0] || demo;
   const values = latest ? auditCounts(latest.report) : {};
-  for (const id of ["score", "findings", "critical", "requirements"]) {
+  for (const id of ["score", "findings", "high", "requirements"]) {
     $(`overview-${id}`).textContent = values[id] ?? "—";
   }
   $("overview-origin").textContent = latest?.id === "demo-preview" ? msg("exampleLabel")

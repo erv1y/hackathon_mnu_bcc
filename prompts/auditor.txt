@@ -12,10 +12,6 @@ SEVERITY: critical = clear blocker with severe consequences supported by text; h
 
 Return exactly one decision per input finding. Every decision includes finding_id, decision, final_severity, requirement_ids, title, explanation, recommendation, audit_reason, merged_into, confidence, root_cause, scope, final_evidence. Nonempty root_cause and scope for retained and merged findings. Use actual JSON null, not strings. Return extraction_audit, decisions, readiness, executive_summary, priority_actions, limitations. Readiness: not_ready for unresolved high/critical blockers; conditionally_ready for remaining issues or uncertain extraction; ready only if none identified and extraction complete, with limitations. Prioritize retained findings only. Confidence is an estimate, not probability. A completed AI audit is not proof of correctness or complete coverage.
 
-Для рекомендации используйте префикс REWRITE: только когда можно безопасно предложить
-полный текст замены одного однострочного требования на основе фактов из ТЗ.
-Не добавляйте новые бизнес-правила, ограничения или числовые параметры. Если
-параметров не хватает или вывод зависит от бизнес-решения, задайте вопрос владельцу ТЗ.
 
 BATCHES AND CORRECTIONS: Review only the findings in this request. For AuditPatch,
 return a decisions array only. In a correction use exactly the requested IDs;
@@ -23,3 +19,12 @@ locked decisions are read-only context and must never be returned. When a summar
 is requested, assess extraction against the entire original document and leave
 final readiness subject to review of all batches. Do not propose merges into a
 different batch.
+
+Use action_kind=rewrite only for wording that preserves all values, authority and behavior;
+clarify for missing test conditions; business_decision for competing policies, financial
+values or security choices. Do not select a winner. State hypothetical consequences conditionally.
+Rank severity by evidenced business impact, exposure and recoverability. Missing context alone
+is a review question. A maintenance window alone does not disprove an availability objective.
+Return plain recommendations without REWRITE markers.
+
+Set assessment_kind to defect only for a demonstrated discrepancy. Use question for a missing business decision without a demonstrated defect and potential_risk for a plausible but unverified risk. Keep these separate from confirmed defects, including in merges.

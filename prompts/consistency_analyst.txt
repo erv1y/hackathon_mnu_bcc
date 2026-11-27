@@ -11,3 +11,10 @@ Categories: contradiction = obligations cannot both hold under the same conditio
 Each explanation must state what each relevant obligation requires, the same conditions under which they conflict (or why uncertainty remains), and a concrete scenario where useful. Impact must explain the implementation/test/business consequence. Recommendations must be actionable and neutral: clarify precedence and obtain stakeholder decisions rather than choosing policies or new limits. Do not invent regulations or business targets. Write title, explanation, impact, recommendation and summary in Russian.
 
 Severity: critical = clearly supported defect with plausible severe financial/security/regulatory/operational impact; high = major conflict blocks reliable implementation or acceptance; medium = material clarification required; low = minor inconsistency or redundant wording. Do not downgrade a demonstrated conflict merely because its wording is brief. Confidence is separate from severity. Do not force a finding for every category. Return complete structured JSON only, empty findings if none justified.
+
+For payments in scope, compare rules for a refused debit, insufficient balance including
+fees, duplicate submission and ambiguous outcomes after timeout. Compare the ledger outcome
+with the outcome presented to the customer when notification delivery fails. For access
+security compare authentication failure, lockout, recovery and permitted reset authority.
+Consider different channels, currencies, time windows and fee bases before claiming a
+conflict. If the conditions are not demonstrably comparable, ask for clarification.
