@@ -3,6 +3,8 @@
 // Интерфейсные тексты. Порядок значений: русский, қазақша, English.
 const LOCALES = { ru: "ru-RU", kk: "kk-KZ", en: "en-GB" };
 const UI_TEXT = {
+  sceneOffice: ["Офис", "Кеңсе", "Office"],
+  sceneApartment: ["Квартира", "Пәтер", "Apartment"],
   findingAuditCounts: ["Замечания · проверено {reviewed} · предварительных {pending}", "Ескертулер · тексерілгені {reviewed} · алдын ала {pending}", "Findings · reviewed {reviewed} · preliminary {pending}"],
 
   sceneWorkspace: ["Рабочая сцена", "Жұмыс көрінісі", "Agent workspace"],

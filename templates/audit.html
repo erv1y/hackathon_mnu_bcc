@@ -286,6 +286,13 @@
     <div class="scene-toolbar">
       <h2 id="scene-panel-title" data-msg="sceneWorkspace">Рабочая сцена</h2>
       <div class="scene-controls">
+        <button type="button" class="btn-secondary"
+          data-scene-mode="deep" data-msg="sceneOffice"
+          aria-pressed="true">Офис</button>
+        <button type="button" class="btn-secondary"
+          data-scene-mode="quick" data-msg="sceneApartment"
+          aria-pressed="false">Квартира</button>
+
         <select id="scene-inspect" data-label="sceneInspect" aria-label="Выбрать агента"></select>
         <button type="button" class="btn-mini" id="scene-camera-reset" data-msg="sceneCameraReset">Сбросить вид</button>
         <button type="button" class="btn-mini" data-scene-zoom="-1" data-label="sceneZoomOut" aria-label="Уменьшить">−</button>

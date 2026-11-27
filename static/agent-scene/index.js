@@ -42,6 +42,7 @@ class AgentScene {
     this.pointerDirty = false;
     this.selectedAgent = null;
     this.zoom = 1;
+    this.pan = new THREE.Vector3();
   }
 
   get animated() {
@@ -165,18 +166,95 @@ class AgentScene {
     const close = document.getElementById("scene-preview-close");
     const workspace = document.getElementById("audit-flow");
     if (!open || !close || !workspace) return;
+
     open.classList.remove("hidden");
+    this.panel.querySelector(".scene-controls").append(close);
+
+    let previousScroll = 0;
+
     const setPreview = (visible) => {
+      if (visible) previousScroll = window.scrollY;
+
       document.body.classList.toggle("scene-preview-open", visible);
-      workspace.inert = visible;
+      workspace.inert = false;
       close.classList.toggle("hidden", !visible);
-      (visible ? close : open).focus();
+      open.setAttribute("aria-expanded", String(visible));
+
+      requestAnimationFrame(() => {
+        this.resize();
+        this.updateLoop();
+        this.renderIfStatic();
+
+        if (visible) {
+          this.panel.scrollIntoView({ block: "start" });
+          close.focus({ preventScroll: true });
+        } else {
+          open.focus({ preventScroll: true });
+          window.scrollTo(0, previousScroll);
+        }
+      });
     };
-    open.addEventListener("click", () => setPreview(true));
-    close.addEventListener("click", () => setPreview(false));
-    window.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && workspace.inert) setPreview(false);
+
+    open.addEventListener("click", () => {
+      setPreview(!document.body.classList.contains("scene-preview-open"));
     });
+
+    close.addEventListener("click", () => setPreview(false));
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" &&
+          document.body.classList.contains("scene-preview-open")) {
+        setPreview(false);
+      }
+    });
+
+    const controls = this.panel.querySelectorAll("[data-scene-mode]");
+
+    this.refreshModeControls = () => {
+      controls.forEach(button => {
+        button.disabled = workspace.dataset.stage === "working";
+        button.setAttribute("aria-pressed",
+          String(button.dataset.sceneMode === this.mode));
+      });
+    };
+
+    controls.forEach(button => {
+      button.addEventListener("click", () => {
+        if (workspace.dataset.stage === "working") return;
+
+        const mode = button.dataset.sceneMode;
+
+        if (workspace.dataset.stage === "upload") {
+          const radio = document.querySelector(
+            `input[name="check-mode"][value="${mode}"]`
+          );
+
+          if (radio) {
+            radio.checked = true;
+            radio.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        } else {
+          this.setMode(mode);
+        }
+
+        this.refreshModeControls();
+      });
+    });
+
+    new MutationObserver(() => {
+      if (workspace.dataset.stage === "upload") {
+        const radio = document.querySelector(
+          'input[name="check-mode"]:checked'
+        );
+        if (radio) this.setMode(radio.value);
+      }
+      this.refreshModeControls();
+    }).observe(workspace, {
+      attributes: true,
+      attributeFilter: ["data-stage"]
+    });
+
+    this.refreshModeControls();
   }
 
   bind() {
@@ -197,11 +275,71 @@ class AgentScene {
       if (!this.running) this.updateHover();
     });
     this.viewport.addEventListener("click", (event) => {
+      if (this.suppressSceneClick) {
+        this.suppressSceneClick = false;
+        return;
+      }
       this.selectedAgent = this.hitAgent(event.clientX, event.clientY)?.key || null;
       this.inspect.value = this.selectedAgent || "";
       this.selectAgent(this.selectedAgent);
       this.renderIfStatic();
     });
+    this.viewport.addEventListener("wheel", (event) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1);
+      this.zoom = Math.max(0.65, Math.min(2.2,
+        this.zoom * Math.exp(-delta * 0.0015)));
+      this.resize();
+      this.renderIfStatic();
+    }, { passive: false });
+
+    this.viewport.addEventListener("pointerdown", (event) => {
+      if (!event.isPrimary || event.button !== 0) return;
+      this.suppressSceneClick = false;
+      if (event.pointerType === "touch") return;
+      this.panDrag = {
+        id: event.pointerId,
+        x: event.clientX,
+        y: event.clientY
+      };
+      this.viewport.setPointerCapture(event.pointerId);
+    });
+
+    this.viewport.addEventListener("pointermove", (event) => {
+      const drag = this.panDrag;
+      if (!drag || drag.id !== event.pointerId) return;
+      const dx = event.clientX - drag.x;
+      const dy = event.clientY - drag.y;
+      if (Math.abs(dx) + Math.abs(dy) < 3) return;
+
+      this.suppressSceneClick = true;
+      const scale = (this.camera.top - this.camera.bottom) /
+        Math.max(1, this.viewport.clientHeight);
+
+      const right = new THREE.Vector3(1, 0, 0)
+        .applyQuaternion(this.camera.quaternion);
+      const up = new THREE.Vector3(0, 1, 0)
+        .applyQuaternion(this.camera.quaternion);
+
+      this.pan.addScaledVector(right, -dx * scale);
+      this.pan.addScaledVector(up, dy * scale);
+      this.pan.clampLength(0, 8);
+
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      this.resize();
+      this.renderIfStatic();
+    });
+
+    const endPan = (event) => {
+      if (this.panDrag?.id === event.pointerId) this.panDrag = null;
+    };
+
+    this.viewport.addEventListener("pointerup", endPan);
+    this.viewport.addEventListener("pointercancel", endPan);
+    this.viewport.addEventListener("lostpointercapture", endPan);
+
     this.inspect = document.getElementById("scene-inspect");
     this.inspect.addEventListener("change", () => {
       this.selectedAgent = this.inspect.value || null;
@@ -210,11 +348,12 @@ class AgentScene {
     });
     document.getElementById("scene-camera-reset").addEventListener("click", () => {
       this.zoom = 1;
+      this.pan.set(0, 0, 0);
       this.resize();
       this.renderIfStatic();
     });
     this.panel.querySelectorAll("[data-scene-zoom]").forEach((button) => button.addEventListener("click", () => {
-      this.zoom = Math.max(0.85, Math.min(1.5, this.zoom + Number(button.dataset.sceneZoom) * 0.12));
+      this.zoom = Math.max(0.85, Math.min(2.2, this.zoom + Number(button.dataset.sceneZoom) * 0.12));
       this.resize();
       this.renderIfStatic();
     }));
@@ -287,6 +426,7 @@ class AgentScene {
     remember(mode);
     if (mode === this.mode) return;
     this.mode = mode;
+    this.refreshModeControls?.();
     this.selectedAgent = null;
     this.refreshInspector();
     this.pipeline.reset();
@@ -329,7 +469,7 @@ class AgentScene {
     const halfH = Math.max(5.4, 8.7 / aspect) / this.zoom;
     const cam = this.camera;
     cam.left = -halfH * aspect; cam.right = halfH * aspect; cam.top = halfH; cam.bottom = -halfH;
-    const target = new THREE.Vector3(0, .35, 0);
+    const target = new THREE.Vector3(0, .35, 0).add(this.pan);
     this.cameraTarget = target;
     cam.position.copy(target).add(new THREE.Vector3(14, 12.5, 14));
     cam.lookAt(target);
