@@ -101,8 +101,9 @@ class AuditorRecoveryTests(unittest.TestCase):
         pdf = self.http.post("/api/audit/pdf", json=report["native"])
         self.assertEqual(pdf.status_code, 200)
         with pymupdf.open(stream=pdf.content) as document:
-            self.assertIn("частичный отчёт", document[0].get_text())
-            self.assertIn("Готовность не оценена", document[0].get_text())
+            pdf_text = " ".join(document[0].get_text().split())
+            self.assertIn("частичный отчёт", pdf_text)
+            self.assertIn("Готовность не оценена", pdf_text)
 
     def test_disk_checkpoint_requires_consent_and_resumes_after_failure(self):
         with patch.object(auditor, "ask_gemini", side_effect=["{}"] * 3 + [self.result.model_dump_json()]):
