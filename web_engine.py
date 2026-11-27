@@ -142,12 +142,12 @@ def analyze(items, settings, language, mode, context, max_chars, emit, *, use_ca
         )))
         memory_checkpoint = None
         if mode == "deep" and not use_cache:
-            fingerprint = document_key(paths, mode, context)
+            fingerprint = document_key(paths, mode, context, language)
             memory_checkpoint = AUDIT_RETRIES.take(retry_token, fingerprint) if retry_token else InMemorySaver()
         with CACHE_LOCK if use_cache else nullcontext():
             result = run_validation(paths, mode=mode, context=context, sections=sections,
                                     node_callback=on_node, write_reports=False, use_cache=use_cache,
-                                    memory_checkpoint=memory_checkpoint)
+                                    memory_checkpoint=memory_checkpoint, language=language)
         if bundle.warnings and hasattr(result, "audit"):
             result.passport["source_warnings"] = list(bundle.warnings)
             result.passport["audit_metrics"]["score"] = None

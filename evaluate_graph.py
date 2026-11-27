@@ -35,11 +35,14 @@ def main():
     parser.add_argument("--dataset", type=Path, default=Path(__file__).parent / "evaluation/graph-synthetic.json")
     parser.add_argument("--check-data", action="store_true")
     parser.add_argument("--mode", choices=("quick", "deep"), default="deep")
+    parser.add_argument("--case", help="Evaluate only this scenario ID")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--diagnostics-dir", type=Path)
     parser.add_argument("--rescore", type=Path, help="Directory of previously saved case diagnostics")
     parser.add_argument("--expert-decisions", type=Path, help="JSON judgments keyed by case ID and expected:prediction indices")
     args = parser.parse_args()
+    if args.rescore and args.case:
+        parser.error("--case is only available with a dataset.")
     if args.rescore and args.check_data:
         parser.error("Choose --rescore or --check-data.")
     judgments = json.loads(args.expert_decisions.read_text(encoding="utf-8")) if args.expert_decisions else {}
@@ -63,6 +66,10 @@ def main():
     else:
         suite = read_data(args.dataset, GraphSuite)
         mode, version = args.mode, suite.version
+        if args.case:
+            suite.cases = [case for case in suite.cases if case.id == args.case]
+            if not suite.cases:
+                parser.error("Unknown case ID.")
         ids = {case.id for case in suite.cases}
         if not ids or len(ids) != len(suite.cases):
             parser.error("The dataset must contain unique case IDs.")

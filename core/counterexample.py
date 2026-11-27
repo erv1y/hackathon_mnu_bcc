@@ -22,6 +22,7 @@ class DirectReview(BaseModel):
     a: Side
     b: Side
     rationale: str
+    severity: Literal["critical", "high", "medium", "low"] | None = None
     title: str
     recommendation: str
 
@@ -91,7 +92,7 @@ def validate_reviews(result, batch, reqs, locked):
 
 
 def analyze_counterexamples(extraction, consistency, sections=None, debug=None):
-    from core.llm_client import ask_gemini
+    from core.llm_client import request_language, ask_gemini
     from agents.consistency_analyst import validate_findings
     validate_findings(consistency, extraction)
     reqs = {r.id:r for r in extraction.requirements}
@@ -158,14 +159,22 @@ def analyze_counterexamples(extraction, consistency, sections=None, debug=None):
             while f'LOGIC-{n:03d}' in used: n+=1
             fid=f'LOGIC-{n:03d}'
             used.add(fid)
-            f = ConsistencyFinding(id=fid, category='contradiction' if r.verdict=='contradiction' else 'inconsistent_constraint',
-                    severity='high' if r.verdict=='contradiction' else 'medium',
-                    requirement_ids=ids,title=r.title,evidence=evidence,
-                    explanation=f'[DIRECT_COUNTEREXAMPLE] {r.pair_id}. Область: {r.scope}. Гипотетический сценарий: {r.scenario}. '
-                    f'{ids[0]}: {r.a.expected_result}. {ids[1]}: {r.b.expected_result}. Обоснование AI: {r.rationale}. '
-                    'Кандидат для аудита; подлинность цитат не доказывает правильность интерпретации.',
-                    impact='При подтверждении интерпретации реализация или приёмка может дать разные результаты для одного сценария.',
-                    recommendation=r.recommendation,confidence=0.65)
+            scope_label, scenario_label, reason_label, impact = {
+                "ru": ("Область", "Гипотетический сценарий", "Обоснование",
+                       "При подтверждении интерпретации возможны разные результаты в одном сценарии."),
+                "en": ("Scope", "Hypothetical scenario", "Rationale",
+                       "If this interpretation is confirmed, the same scenario can have different outcomes."),
+                "kk": ("Қолдану аясы", "Болжамды сценарий", "Негіздеме",
+                       "Бұл түсіндірме расталса, бір сценарийдің нәтижелері әртүрлі болуы мүмкін."),
+            }[request_language.get()]
+            f = ConsistencyFinding(
+                id=fid, category='contradiction' if r.verdict == 'contradiction' else 'inconsistent_constraint',
+                severity=r.severity or ('high' if r.verdict == 'contradiction' else 'medium'),
+                severity_rationale=r.rationale, requirement_ids=ids, title=r.title, evidence=evidence,
+                explanation=f'[DIRECT_COUNTEREXAMPLE] {r.pair_id}. {scope_label}: {r.scope}. '
+                            f'{scenario_label}: {r.scenario}. {ids[0]}: {r.a.expected_result}. '
+                            f'{ids[1]}: {r.b.expected_result}. {reason_label}: {r.rationale}.',
+                impact=impact, recommendation=r.recommendation, confidence=0.65)
             findings.append(f)
             candidates.append(fid)
     diagnostic.update(reviewed_pair_ids=sorted(reviewed),unresolved_pair_ids=sorted(unresolved),

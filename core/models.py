@@ -48,6 +48,7 @@ class QualityFinding(BaseModel):
 
     evidence: str
     explanation: str
+    severity_rationale: str = ""
     recommendation: str
 
     confidence: float = Field(ge=0, le=1)
@@ -103,6 +104,7 @@ class ConsistencyFinding(BaseModel):
     title: str
     evidence: list[FindingEvidence] = Field(min_length=1)
     explanation: str
+    severity_rationale: str = ""
     impact: str
     recommendation: str
 
@@ -112,6 +114,12 @@ class ConsistencyFinding(BaseModel):
 class ConsistencyAnalysisResult(BaseModel):
     findings: list[ConsistencyFinding]
     summary: str
+
+Criterion = Literal["correctness", "clarity", "unambiguity", "completeness", "verifiability",
+                    "missing_requirement", "missing_dependency", "contradiction", "duplicate",
+                    "feasibility", "consistency", "necessity", "traceability",
+                    "inconsistent_constraint", "scope_conflict", "terminology_inconsistency"]
+
 
 class AuditDecision(BaseModel):
     finding_id: str
@@ -137,6 +145,9 @@ class AuditDecision(BaseModel):
     recommendation: str
     audit_reason: str
 
+    primary_criterion: Criterion | None = None
+    related_criteria: list[Criterion] = Field(default_factory=list, max_length=4)
+    severity_rationale: str = ""
     assessment_kind: Literal["defect", "question", "potential_risk"] = "defect"
     action_kind: Literal["rewrite", "clarify", "business_decision"] = "clarify"
     merged_into: str | None = None

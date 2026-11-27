@@ -24,7 +24,7 @@ from core.models import (ValidationResult, ExtractionResult, QualityAnalysisResu
 from core.advanced_report import generate_pdf
 from core.audit_metrics import audit_metrics, needs_human_review
 from core.run_metadata import tracked, now, revision, id_mapping
-from core.llm_client import MODEL_NAME, FALLBACK_MODELS, request_context, request_metrics, request_retry
+from core.llm_client import MODEL_NAME, FALLBACK_MODELS, request_context, request_metrics, request_retry, request_language, request_stage
 from agents.quick_validator import quick_validate, QuickValidationResult
 from agents.extractor import extract_requirements
 from agents.quality_analyst import analyze_quality
@@ -116,7 +116,7 @@ def normalize_paths(file_path):
     return sorted(paths, key=lambda p: p.name.casefold())
 
 
-def document_key(file_path, mode="deep", context=""):
+def document_key(file_path, mode="deep", context="", language="ru"):
     paths = normalize_paths(file_path)
     digest = hashlib.sha256()
     def add(value):
@@ -125,13 +125,14 @@ def document_key(file_path, mode="deep", context=""):
     add(CACHE_VERSION.encode())
     add(mode.encode())
     add(context.encode())
+    add(language.encode())
     for path in paths:
         add(path.name.encode('utf-8'))
         add(path.read_bytes())
     add(json.dumps([MODEL_NAME, FALLBACK_MODELS, audit_models(), audit_batch_size()]).encode())
     sources = [BASE_DIR / 'orchestrator.py']
     sources += [BASE_DIR / 'core' / name for name in (
-        'models.py', 'document_reader.py', 'llm_client.py', 'run_metadata.py', 'rule_engine.py', 'business_logic.py', 'counterexample.py', 'release_review.py')]
+        'analytical_policy.py', 'models.py', 'document_reader.py', 'llm_client.py', 'run_metadata.py', 'rule_engine.py', 'business_logic.py', 'counterexample.py', 'release_review.py')]
     sources += [BASE_DIR / 'agents' / (name + '.py') for name in (
         'extractor', 'quality_analyst', 'consistency_analyst', 'auditor', 'quick_validator')]
     sources += sorted((BASE_DIR / 'prompts').glob('*.txt'))
@@ -173,7 +174,14 @@ def normalize_audit(quality, consistency, audit):
             d.action_kind = "business_decision"
         if d.action_kind == "business_decision":
             refs = ", ".join(d.requirement_ids)
-            d.recommendation = f"Владельцу требований согласовать правило ({refs}) по замечанию «{d.title}» и зафиксировать критерии приёмки."
+            templates = {
+                "ru": "Владелец процесса выбирает применимое правило для {refs} по вопросу «{title}». Сопоставьте условия и исключения в цитатах. В критериях приёмки закрепите один ожидаемый результат для каждого спорного и граничного случая.",
+                "en": "The process owner should resolve ‘{title}’ for {refs}. Compare the conditions and exceptions in the quoted rules. Record one approved outcome for each disputed and boundary case in acceptance tests.",
+                "kk": "Процесс иесі {refs} үшін «{title}» мәселесін шешуі керек. Дәйексөздердегі шарттар мен ерекшеліктерді салыстырыңыз. Әр даулы және шекаралық жағдай үшін мақұлданған нәтижені қабылдау сынағында бекітіңіз.",
+            }
+            d.recommendation = templates[request_language.get()].format(refs=refs, title=d.title)
+        if d.final_severity in ("high", "critical") and not d.severity_rationale.strip():
+            d.severity_rationale = d.audit_reason
         if d.action_kind == "rewrite":
             # Permit whitespace-only rewrites; any substantive edit needs explicit review.
             if len(d.final_evidence) != 1 or d.recommendation.split() != d.final_evidence[0].quote.split():
@@ -226,7 +234,13 @@ def consistency_node(state):
     result, models = tracked(timed_analysis, 'Consistency Analyst', analyze_consistency, extraction, state['sections'])
     result = augment_consistency(extraction, result, state['sections'])
     logic_debug = {}
-    result, logic_models = tracked(timed_analysis, 'Direct Counterexample Engine', analyze_counterexamples, extraction, result, state['sections'], logic_debug)
+    token = request_stage.set('counterexample')
+    started = time.perf_counter()
+    try:
+        result, logic_models = tracked(timed_analysis, 'Direct Counterexample Engine', analyze_counterexamples, extraction, result, state['sections'], logic_debug)
+    finally:
+        request_stage.reset(token)
+    logic_debug['elapsed_seconds'] = round(time.perf_counter() - started, 3)
     models.extend(dict(call, stage='direct_counterexample') for call in logic_models)
     validate_findings(result, extraction)
     return {'consistency': result.model_dump(mode='json'), 'consistency_models': models, 'logic_debug': logic_debug}
@@ -247,7 +261,7 @@ def auditor_node(state):
         if new_ids := set(review_debug["added_review_ids"]):
             result, review_models = tracked(review_global_groups, result, findings, extraction, new_ids)
             models.extend(review_models)
-            apply_readiness_floor(result, state.get('logic_debug'))
+        apply_readiness_floor(result, state.get('logic_debug'))
     except AuditValidationError as error:
         logger.warning("Auditor post-review validation failed: %s", error)
         raise AuditorFailure("auditor_validation_failed") from None
@@ -267,12 +281,15 @@ def choose_mode(state):
     return 'quick' if state['mode'] == 'quick' else 'extractor'
 
 
-def build_graph(checkpointer=None, node_callback=None, context="", metrics=None):
+def build_graph(checkpointer=None, node_callback=None, context="", metrics=None, language="ru", timings=None):
     def observed(name, fn):
-        if node_callback is None and not context and metrics is None:
+        if node_callback is None and not context and metrics is None and language == "ru":
             return fn
 
         def execute(state):
+            started = time.perf_counter()
+            stage_token = request_stage.set(name)
+            language_token = request_language.set(language)
             token = request_context.set(context)
             metric_token = request_metrics.set(metrics)
             retry_token = request_retry.set((lambda: node_callback(name, "retrying")) if node_callback else None)
@@ -292,6 +309,10 @@ def build_graph(checkpointer=None, node_callback=None, context="", metrics=None)
                     node_callback(name, "failed")
                 raise
             finally:
+                if timings is not None:
+                    timings[name] = round(time.perf_counter() - started, 3)
+                request_stage.reset(stage_token)
+                request_language.reset(language_token)
                 request_retry.reset(retry_token)
                 request_metrics.reset(metric_token)
                 request_context.reset(token)
@@ -337,7 +358,7 @@ def export_result(result, folder):
 
 def run_validation(file_path, progress_callback=None, reports_dir=None,
                    use_cache=False, force_reanalysis=False, mode="deep", *,
-                   node_callback=None, sections=None, context="", write_reports=True, memory_checkpoint=None):
+                   node_callback=None, sections=None, context="", write_reports=True, memory_checkpoint=None, language="ru"):
     if mode not in ("quick", "deep"):
         raise ValueError("Invalid validation mode")
     started = time.perf_counter()
@@ -354,7 +375,7 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
         raise ValueError("Choose one checkpoint store.")
     if use_cache:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        key = document_key(paths, mode, context)
+        key = document_key(paths, mode, context, language)
         database = str(CACHE_DIR / f'{key}.sqlite')
     elif memory_checkpoint is not None:
         key = 'run'
@@ -366,7 +387,8 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
     audit_failure = None
     with store as saver:
         metrics = []
-        graph = build_graph(saver, node_callback, context, metrics)
+        timings = {}
+        graph = build_graph(saver, node_callback, context, metrics, language, timings)
         if force_reanalysis and use_cache:
             # Delete only the current document/configuration thread.
             saver.delete_thread(key)
@@ -426,7 +448,11 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
             if snapshot.next and not audit_failure:
                 raise RuntimeError('Graph did not finish; retry to resume.')
         passport = {'mode': mode, 'run_kind': run_kind, 'analysis_started_utc': state.get('original_started'), 'report_run_utc': now(), 'analysis_revision': state.get('original_revision'), 'current_revision': revision(), 'configured_model': MODEL_NAME, 'successful_responses': {k: state.get(k+'_models', []) for k in (['quick'] if mode == 'quick' else ['extraction','quality','consistency','audit'])}}
+        passport.update(language=language, stage_seconds=timings, model_attempts=metrics)
         passport["api_attempts"] = len(metrics)
+        if "consistency" in timings and "elapsed_seconds" in state.get("logic_debug", {}):
+            timings["counterexample"] = state["logic_debug"]["elapsed_seconds"]
+            timings["consistency"] = round(max(0, timings["consistency"] - timings["counterexample"]), 3)
         passport["reported_tokens"] = {
             field: sum(values) if (values := [call[field] for call in metrics if call.get(field) is not None]) else None
             for field in ("input_tokens", "output_tokens", "total_tokens")

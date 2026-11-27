@@ -78,7 +78,7 @@ GENERAL RULES
 
 Return valid structured JSON matching the schema.
 
-Write explanations and recommendations in Russian.
+Write explanations and recommendations in the configured output language.
 
 Do not translate or rewrite source quotations.
 

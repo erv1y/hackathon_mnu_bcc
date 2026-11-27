@@ -27,6 +27,7 @@ class ConsistencyCandidate(BaseModel):
     requirement_ids: list[str] = Field(min_length=1)
     title: str
     explanation: str
+    severity_rationale: str = ""
     impact: str
     recommendation: str
     confidence: float = Field(ge=0, le=1)

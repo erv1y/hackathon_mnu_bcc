@@ -22,6 +22,7 @@ class QualityCandidate(BaseModel):
                        'feasibility','necessity','traceability','unambiguity']
     severity: Literal['critical','high','medium','low']
     explanation: str
+    severity_rationale: str = ""
     recommendation: str
     confidence: float = Field(ge=0, le=1)
 

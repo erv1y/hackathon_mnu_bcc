@@ -78,3 +78,20 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(rescored["type"], "offline_rescore")
         self.assertEqual(rescored["metrics"], aggregate([item])[0])
         self.assertEqual(rescored["diagnostic_metrics"], aggregate([item])[1])
+
+    def test_failed_auditor_stays_in_independent_recall_denominator(self):
+        complete = report(finding())
+        complete["independent_audit"] = True
+        partial = report(finding())
+        partial.update(partial=True, auditor_retry={"token": "secret"}, failed_agents=["logic"])
+        partial["native"]["passport"].update(mode="deep", stage_seconds={"auditor": 2.5},
+            model_attempts=[{"model": "backup", "stage": "auditor", "fallback": True}])
+        records = [diagnostic_case(case(), item) for item in (complete, partial)]
+        metrics = aggregate(records)[1]
+        self.assertEqual(metrics["independently_audited_semantic_detection"]["recall"], 0.5)
+        self.assertEqual(metrics["preliminary_semantic_detection"]["recall"], 1)
+        self.assertEqual(metrics["end_to_end_success_rate"], 0.5)
+        self.assertEqual(metrics["incomplete_audit_rate"], 0.5)
+        self.assertEqual(metrics["fallback_model_attempts"], {"backup": 1})
+        self.assertEqual(metrics["stage_api_attempts"], {"auditor": 1})
+        self.assertNotIn("secret", json.dumps(records))

@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from html import escape
 import os
+from core.pdf_labels import pdf_label
 
 
 def append_sections(result, output_path, base_generator):
@@ -27,12 +28,13 @@ def append_sections(result, output_path, base_generator):
     def add(value):
         story.append(para(value))
     def title(value):
-        story.append(Paragraph(escape(value), heading))
+        story.append(Paragraph(escape(pdf_label(value, language)), heading))
     def table(rows, widths):
         t = LongTable([[para(x) for x in row] for row in rows], colWidths=widths, repeatRows=1, splitInRow=1)
         t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#dceee9')), ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f3f6f5')]), ('VALIGN',(0,0),(-1,-1),'TOP'), ('LINEBELOW',(0,0),(-1,0),0.6,colors.HexColor('#16836c'))]))
         story.append(t)
     p = getattr(result,'passport',{})
+    language = p.get('language', 'ru')
     title('Паспорт прогона')
     add('Документы: '+', '.join(result.source_files))
     add('Режим: '+str(p.get('mode','не записан'))+'; тип запуска: '+str(p.get('run_kind','не записан')))

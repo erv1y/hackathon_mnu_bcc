@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from statistics import mean
 
-from agents.auditor import prepare_findings
+from agents.auditor import passage_key, prepare_findings
 from analyzer import build_result
 from core.audit_metrics import audit_metrics, needs_human_review
 from core.knowledge_graph import build_knowledge_graph, graph_json
@@ -84,10 +84,16 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
             req = requirements[original["requirement_id"]]
             evidence = [dict(source=req.source, quote=evidence, page=req.page, paragraph=req.paragraph)]
         proofs = []
+        seen_proofs = set()
         for item in evidence:
             proof = point(item["source"], item["quote"], item.get("page"), item.get("paragraph"))
             if proof:
-                proofs.append(dict(proof, requirement_id=item.get("requirement_id") or ids[0]))
+                rid = item.get("requirement_id") or ids[0]
+                identity = (rid, item["source"], item.get("page"), item.get("paragraph"),
+                            passage_key(proof["text"]))
+                if identity not in seen_proofs:
+                    proofs.append(dict(proof, requirement_id=rid))
+                    seen_proofs.add(identity)
         candidate = needs_human_review(decision) if decision else finding_id.startswith("REVIEW-")
         reason = "human_review" if candidate else None
         if decision and decision.assessment_kind != "defect":
@@ -95,7 +101,10 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
         criterion = original.get("category") or original["criterion"]
         recommendation = decision.recommendation if decision else original["recommendation"]
         recommendation = recommendation.removeprefix("REWRITE:").strip()
-        row = dict(action_kind=decision.action_kind if decision else "clarify", id=finding_id, title=(decision.title if decision else original.get("title")) or criterion,
+        row = dict(primary_criterion=(decision.primary_criterion or criterion) if decision else criterion,
+                   related_criteria=decision.related_criteria if decision else [],
+                   severity_rationale=(decision.severity_rationale or decision.audit_reason) if decision else original.get("severity_rationale"),
+                   action_kind=decision.action_kind if decision else "clarify", id=finding_id, title=(decision.title if decision else original.get("title")) or criterion,
                    severity=severity, criterion_id=criterion, criterion={"id": criterion, "title": criterion},
                    requirement_ids=ids, evidence=proofs, quote=proofs[0]["text"] if proofs else "",
                    issue=decision.explanation if decision else original["explanation"], suggestion=recommendation,

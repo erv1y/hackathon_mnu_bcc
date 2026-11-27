@@ -3,6 +3,7 @@ from pathlib import Path
 from html import escape
 import os
 from collections import Counter
+from core.pdf_labels import pdf_label
 
 
 def generate_quick_pdf(result, output_path):
@@ -23,30 +24,34 @@ def generate_quick_pdf(result, output_path):
     story = []
     def add(text, style=body):
         story.append(Paragraph(escape(str(text)).replace('\n', '<br/>'), style))
+    language = getattr(result, "passport", {}).get("language", "ru")
+    def label(value):
+        return pdf_label(value, language)
+
     partial = getattr(result, 'auditor_failure', None)
     if partial:
-        add('Deep Validation — частичный отчёт', heading)
+        add(label('Deep Validation — частичный отчёт'), heading)
         reason = ('Проверка решений аудитора не пройдена.' if partial == 'auditor_validation_failed'
                   else 'Аудитор не получил пригодного ответа от Gemini.')
-        add(reason + ' Независимый аудит не завершён. Готовность не оценена.')
+        add(label(reason) + ' ' + label('Независимый аудит не завершён. Готовность не оценена.'))
     else:
-        add('Quick Validation — предварительный отчёт', heading)
-        add('Один AI-агент. Независимый аудит не выполнялся. Результаты требуют проверки специалистом.')
+        add(label('Quick Validation — предварительный отчёт'), heading)
+        add(label('Один AI-агент. Независимый аудит не выполнялся. Результаты требуют проверки специалистом.'))
     add('Документы: ' + ', '.join(result.source_files))
     add(f'Время текущего запуска: {result.execution_time_seconds} сек.')
     add(f'Требований: {len(result.extraction.requirements)}; замечаний качества: {sum(len(a.findings) for a in result.quality.assessments)}; замечаний согласованности: {len(result.consistency.findings)}. Эти категории могут пересекаться.')
-    add('Реестр требований', heading)
+    add(label('Реестр требований'), heading)
     for r in result.extraction.requirements:
         add(f'{r.id} | {r.source} | стр. {r.page or "—"}, абз. {r.paragraph or "—"}')
         add(r.text)
-    add('Предварительные замечания качества', heading)
+    add(label('Предварительные замечания качества'), heading)
     for a in result.quality.assessments:
         add(f'{a.requirement_id}: {a.status}, {a.quality_score}/100')
         for f in a.findings:
             add(f'{f.severity} / {f.criterion}: {f.explanation}')
             add(f'Цитата агента: {f.evidence}')
             add(f'Рекомендация: {f.recommendation}')
-    add('Предварительные замечания согласованности', heading)
+    add(label('Предварительные замечания согласованности'), heading)
     for f in result.consistency.findings:
         add(f'{f.id} | {f.severity} | {f.title}')
         add(f.explanation)

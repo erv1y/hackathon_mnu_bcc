@@ -13,6 +13,7 @@ def wording(text):
 
 def diagnostic_case(case, report, decisions=None):
     decisions = decisions or {}
+    report = {key: value for key, value in report.items() if key != "auditor_retry"}
     predictions = [row for module in report["modules"] for row in module["defects"]]
     active = [row for row in predictions if row.get("review_reason") is None]
     strict_report = {**report, "modules": [{"defects": active}]}
@@ -165,6 +166,9 @@ def diagnostic_case(case, report, decisions=None):
         "quote_authenticity": authentic,
         "duplicate_prediction_indices": sorted(duplicates),
         "diagnostic_counts": dict(row_metrics),
+        "independently_audited": report.get("independent_audit", False),
+        "end_to_end_success": not report.get("partial") and not report["failed_agents"]
+                               and report["coverage"]["agents_completed"] == report["coverage"]["agents_total"],
         "severity_confusion": {level: {actual: confusion[level, actual]
                                       for actual in (*LEVELS, "Undetected")} for level in LEVELS},
     }
@@ -208,6 +212,44 @@ def aggregate(records):
     matrix = {level: {actual: sum(r["severity_confusion"][level][actual] for r in records)
                       for actual in (*LEVELS, "Undetected")} for level in LEVELS}
     diagnostic["severity_confusion"] = matrix
+    audited = Counter()
+    preliminary = Counter()
+    model_usage = Counter()
+    fallback_usage = Counter()
+    stage_attempts = Counter()
+    stage_seconds = Counter()
+    stage_samples = Counter()
+    for record in records:
+        destination = audited if record["independently_audited"] else preliminary
+        destination.update(record["diagnostic_counts"])
+        passport = record["report"]["native"]["passport"]
+        for call in passport.get("model_attempts", []):
+            model_usage[call["model"]] += 1
+            fallback_usage[call["model"]] += bool(call.get("fallback"))
+            stage_attempts[call.get("stage") or "unknown"] += 1
+        for stage, elapsed in passport.get("stage_seconds", {}).items():
+            stage_seconds[stage] += elapsed
+            stage_samples[stage] += 1
+    def detection(partition, expected):
+        return {
+            "matched": partition["matched"], "predictions": partition["predictions"], "expected": expected,
+            "precision": _ratio(partition["matched"], partition["predictions"]),
+            "recall": _ratio(partition["matched"], expected),
+            "f1": _ratio(2 * partition["matched"], partition["predictions"] + expected),
+        }
+
+    deep = [r for r in records if r["report"]["native"]["passport"].get("mode") == "deep"
+            or r["report"].get("mode") == "deep" or r["independently_audited"]]
+    diagnostic.update(
+        preliminary_semantic_detection=detection(preliminary, preliminary["expected"]),
+        independently_audited_semantic_detection=detection(audited, m["expected"]),
+        end_to_end_success_rate=_ratio(sum(r["end_to_end_success"] for r in records), len(records)),
+        incomplete_audit_rate=_ratio(sum(not r["independently_audited"] for r in deep), len(deep)),
+        provider_model_attempts=dict(model_usage), fallback_model_attempts=dict(+fallback_usage),
+        stage_api_attempts=dict(stage_attempts),
+        stage_seconds={stage: round(total, 3) for stage, total in stage_seconds.items()},
+        stage_latency_samples=dict(stage_samples),
+    )
     for level in ("High", "Critical"):
         diagnostic[f"{level.lower()}_exact_recall"] = _ratio(matrix[level][level], m[f"expected_{level}"])
     return legacy, diagnostic

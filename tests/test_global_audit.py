@@ -102,3 +102,26 @@ class GlobalAuditTests(unittest.TestCase):
             audited = auditor.review_global_groups(result, findings, extraction, {review.finding_id})
         self.assertEqual(audited.decisions[-1].merged_into, target.finding_id)
         self.assertEqual(audited.decisions[2].decision, "revised")
+
+    def test_equal_anchors_allow_cross_category_security_review_and_retry(self):
+        extraction, _, quality, consistency, result = fixtures()
+        source, target, _ = result.decisions
+        source.decision, source.final_severity, source.merged_into = "confirmed", "critical", None
+        target.requirement_ids = source.requirement_ids[:]
+        target.final_evidence = source.final_evidence[:]
+        findings = auditor.prepare_findings(quality, consistency)
+        findings[0]["criterion"] = "correctness"
+        findings[1].update(category="missing_requirement", requirement_ids=source.requirement_ids[:])
+        proposal = {"merges": [{"finding_id": source.finding_id, "merged_into": target.finding_id,
+                                "audit_reason": "Same disclosure and preconditions."}]}
+        with patch.object(auditor, "ask_gemini", side_effect=["{bad", json.dumps(proposal)]) as model:
+            audited = auditor.review_global_groups(result, findings, extraction)
+        self.assertEqual(model.call_count, 2)
+        self.assertEqual(audited.decisions[0].merged_into, target.finding_id)
+        self.assertEqual(audited.decisions[1].final_severity, "critical")
+
+    def test_evidence_prefix_normalization_retains_distinct_passages(self):
+        self.assertEqual(auditor.passage_key("- Verify the recipient."), "Verify the recipient.")
+        self.assertEqual(auditor.passage_key("2. Verify the recipient."), "Verify the recipient.")
+        self.assertNotEqual(auditor.passage_key("Verify the recipient."),
+                            auditor.passage_key("Verify the sender."))

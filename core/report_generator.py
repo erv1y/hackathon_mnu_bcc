@@ -21,6 +21,7 @@ from reportlab.platypus import (
     PageBreak
 )
 
+from core.pdf_labels import pdf_label
 from core.audit_metrics import audit_metrics, needs_human_review
 from core.models import ValidationResult
 from agents.auditor import prepare_findings
@@ -193,6 +194,11 @@ def generate_pdf(result, output_path, *, executive=False):
     }
 
     story = []
+    language = getattr(result, "passport", {}).get("language", "ru")
+
+    def label(value):
+        return pdf_label(value, language)
+
 
     def paragraph(text, style="body"):
         return Paragraph(
@@ -201,13 +207,13 @@ def generate_pdf(result, output_path, *, executive=False):
         )
 
     def add(text, style="body"):
-        story.append(paragraph(text, style))
+        story.append(paragraph(label(text), style))
 
-    def field(label, value):
+    def field(name, value):
 
         story.append(
             Paragraph(
-                f"<b>{escape(str(label))}:</b> "
+                f"<b>{escape(str(label(name)))}:</b> "
                 f"{escape(str(value))}",
                 styles["body"]
             )
@@ -216,8 +222,8 @@ def generate_pdf(result, output_path, *, executive=False):
     def table(rows, widths):
 
         converted = [
-            [paragraph(cell, "cell") for cell in row]
-            for row in rows
+            [paragraph(label(cell) if index == 0 else cell, "cell") for cell in row]
+            for index, row in enumerate(rows)
         ]
 
         t = Table(
@@ -291,7 +297,7 @@ def generate_pdf(result, output_path, *, executive=False):
 
     field(
         "Готовность",
-        READINESS_NAMES[result.audit.readiness]
+        label(READINESS_NAMES[result.audit.readiness])
     )
 
     metrics = Table(
@@ -302,9 +308,9 @@ def generate_pdf(result, output_path, *, executive=False):
                 paragraph("4", "metric")
             ],
             [
-                paragraph("Требований", "metric_label"),
-                paragraph("Замечаний", "metric_label"),
-                paragraph("AI-агента", "metric_label")
+                paragraph(label("Требований"), "metric_label"),
+                paragraph(label("Замечаний"), "metric_label"),
+                paragraph(label("AI-агента"), "metric_label")
             ]
         ],
         colWidths=[170, 170, 170]
@@ -327,7 +333,7 @@ def generate_pdf(result, output_path, *, executive=False):
         "critical", "high", "medium", "low"
     ):
         rows.append([
-            SEVERITY_NAMES[severity],
+            label(SEVERITY_NAMES[severity]),
             severity_counts[severity]
         ])
 
@@ -400,7 +406,7 @@ def generate_pdf(result, output_path, *, executive=False):
 
     add(
         "Статус готовности: "
-        + READINESS_NAMES[result.audit.readiness]
+        + label(READINESS_NAMES[result.audit.readiness])
     )
 
     add("4. Приоритетные действия", "heading")
@@ -469,16 +475,16 @@ def generate_pdf(result, output_path, *, executive=False):
 
         story.append(
             Paragraph(
-                "<b>Серьёзность:</b> "
+                f"<b>{label('Серьёзность')}:</b> "
                 f'<font color="{SEVERITY_COLORS[severity]}">'
-                f"{SEVERITY_NAMES[severity]}</font>",
+                f"{label(SEVERITY_NAMES[severity])}</font>",
                 styles["body"]
             )
         )
 
         field(
             "Решение аудитора",
-            DECISION_NAMES[decision.decision]
+            label(DECISION_NAMES[decision.decision])
         )
 
         field(
@@ -551,6 +557,8 @@ def generate_pdf(result, output_path, *, executive=False):
                 )
 
         field("Проблема", decision.explanation)
+        if decision.severity_rationale:
+            field("Обоснование оценки серьёзности", decision.severity_rationale)
 
         field(
             "Рекомендация",
@@ -606,18 +614,20 @@ def generate_pdf(result, output_path, *, executive=False):
     add("8. Журнал аудита", "heading")
 
     rows = [
-        ["ID", "Решение", "Объединено с"]
+        ["ID", "Решение", "Исходная серьёзность", "Итоговая серьёзность", "Объединено с"]
     ]
 
     for decision in result.audit.decisions:
 
         rows.append([
             decision.finding_id,
-            DECISION_NAMES[decision.decision],
+            label(DECISION_NAMES[decision.decision]),
+            label(SEVERITY_NAMES[original_findings[decision.finding_id]["severity"]]),
+            label(SEVERITY_NAMES[decision.final_severity]) if decision.final_severity else "—",
             decision.merged_into or "-"
         ])
 
-    table(rows, [110, 250, 150])
+    table(rows, [85, 120, 105, 105, 95])
 
     add("9. Ограничения анализа", "heading")
 
