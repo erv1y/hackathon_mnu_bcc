@@ -153,7 +153,7 @@ def analyze(items, settings, language, mode, context, max_chars, emit, *, use_ca
             result.passport["source_warnings"] = list(bundle.warnings)
             result.passport.pop("audit_metrics", None)
             coverage = result.passport.get("audit_coverage", {})
-            coverage.update(document_coverage_complete=False, readiness_eligible=False)
+            coverage.update(document_coverage_complete=False, readiness_eligible=False, remaining_phase="source")
             result = DeepPartialRunResult(
                 passport=result.passport, source_files=result.source_files,
                 execution_time_seconds=result.execution_time_seconds,

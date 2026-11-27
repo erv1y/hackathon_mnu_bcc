@@ -79,6 +79,8 @@ def validate_findings(result, extraction_result):
             )
 
         finding_ids.add(finding.id)
+        if len(finding.requirement_ids) != len(set(finding.requirement_ids)):
+            raise ValueError("Duplicate consistency requirement IDs.")
 
         for requirement_id in finding.requirement_ids:
 
@@ -227,9 +229,12 @@ def analyze_consistency(extraction_result, sections=None):
                 rows = data["findings" if pending is None else "resolutions"]
                 if not isinstance(rows, list) or not isinstance(data.get("summary"), str):
                     raise ValueError("invalid envelope")
-            except (ValueError, TypeError, KeyError):
+            except (ValueError, TypeError, KeyError, RecursionError):
                 diagnostics.append(dict(phase=name, attempt=attempt, code="invalid_envelope"))
                 logger.warning("Consistency phase=%s attempt=%d code=invalid_envelope", name, attempt)
+                continue
+            if pending is None and not rows and not data["summary"].strip():
+                diagnostics.append(dict(phase=name, attempt=attempt, code="empty_initial_review"))
                 continue
             summary = data["summary"] or summary
             previous = pending

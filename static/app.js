@@ -735,7 +735,9 @@ function renderReport() {
 
   const messages = [...audit.source_warnings];
   if (audit.auditor_failure) {
-    messages.push(msg(auditorFailureKey(audit.auditor_failure)));
+    const phase = { deduplication: "auditDeduplicationPending", post_review: "auditFinalReviewPending",
+      summary: "auditSummaryPending" }[audit.audit_coverage?.remaining_phase];
+    messages.push(msg(phase || auditorFailureKey(audit.auditor_failure)));
     if (audit.consistency_coverage_complete === false && audit.auditor_failure !== "consistency_incomplete") {
       messages.push(msg("consistencyIncomplete"));
     }

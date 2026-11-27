@@ -86,7 +86,7 @@ class StabilizationTests(unittest.TestCase):
         with patch.object(auditor, "ask_gemini", side_effect=[damaged.model_dump_json(), repaired]) as api:
             audited = auditor.audit_results(sections, extraction, quality, consistency, {"complete": True})
         payload = json.loads(api.call_args.kwargs["prompt"])
-        self.assertEqual([row["id"] for row in payload["evidence_repairs"]["QUAL-001"]], ["R3"])
+        self.assertEqual([row["id"] for row in payload["evidence_repairs"]["QUAL-001"]["verified_sources"]], ["R1", "R3"])
         self.assertEqual(audited.decisions[0].explanation, result.decisions[0].explanation)
 
     def test_grounded_withdrawal_and_bad_indices_preserve_coverage_limit(self):

@@ -31,7 +31,8 @@ test("Auditor validation failure leaves the workflow and scene partial", () => {
   const result = { type: "result", auditor_failure: "auditor_validation_failed" };
   assert.equal(context.handleEvent(result), result);
   assert.deepEqual(steps, [[3, true]]);
-  assert.deepEqual(scene.map((event) => event.type), ["agent_done", "partial_result"]);
+  assert.deepEqual(scene.map((event) => event.type), ["agent_retry", "agent_done", "partial_result"]);
+  assert.equal(scene[0].key, "logic");
 });
 
 test("restored stages are counted without reporting a new agent start", () => {

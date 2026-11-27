@@ -123,7 +123,7 @@ Criterion = Literal["correctness", "clarity", "unambiguity", "completeness", "ve
                     "inconsistent_constraint", "scope_conflict", "terminology_inconsistency"]
 
 
-class AuditDecision(BaseModel):
+class AuditJudgment(BaseModel):
     finding_id: str
 
     decision: Literal[
@@ -139,8 +139,6 @@ class AuditDecision(BaseModel):
         "medium",
         "low"
     ] | None = None
-
-    requirement_ids: list[str]
 
     title: str
     explanation: str
@@ -159,7 +157,15 @@ class AuditDecision(BaseModel):
     # Additive fields: older saved audit reports can still be loaded.
     root_cause: str = ""
     scope: str = ""
+
+
+class AuditDecision(AuditJudgment):
+    requirement_ids: list[str]
     final_evidence: list[FindingEvidence] = Field(default_factory=list)
+
+
+class AuditCandidate(AuditJudgment):
+    evidence_ids: list[str] = Field(description="Relevant verified requirement IDs, empty for rejected decisions")
 
 
 class ExtractionAudit(BaseModel):
@@ -187,6 +193,14 @@ class AuditPatch(BaseModel):
 
 
 class AuditResult(AuditSummary, AuditPatch):
+    pass
+
+
+class AuditCandidatePatch(BaseModel):
+    decisions: list[AuditCandidate]
+
+
+class AuditCandidateResult(AuditSummary, AuditCandidatePatch):
     pass
 
 

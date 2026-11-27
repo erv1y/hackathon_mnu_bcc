@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import pymupdf
 
 from agents import auditor
-from core.models import AuditResult, ConsistencyAnalysisResult, ExtractionResult, FindingEvidence, QualityAnalysisResult
+from core.models import AuditCandidateResult, AuditResult, ConsistencyAnalysisResult, ExtractionResult, FindingEvidence, QualityAnalysisResult
 import orchestrator
 import web
 from web_engine import AuditRetries
@@ -112,6 +112,50 @@ class AuditorRecoveryTests(unittest.TestCase):
             self.assertEqual(len(list((self.root / "checkpoints").glob("*.sqlite"))), 1)
             self.assert_recovered(self.stream(cache="true"))
 
+    def test_disk_checkpoint_restores_evidence_repair_context(self):
+        bad = self.result.model_copy(deep=True)
+        row = bad.decisions[0]
+        row.decision, row.final_severity = "revised", "medium"
+        row.root_cause, row.scope = "Settlement time", "Settlement"
+        with patch.object(auditor, "ask_gemini", side_effect=[
+            bad.model_dump_json(), auditor.GeminiRequestError("rate limit", 429),
+            '{"decisions":[' + self.result.decisions[0].model_dump_json() + ']}',
+        ]) as api:
+            report = self.stream(cache="true")[-1]
+            self.assertEqual(report["audit_coverage"]["remaining_phase"], "finding_review")
+            self.assert_recovered(self.stream(cache="true"))
+        request = json.loads(api.call_args.kwargs["prompt"])
+        context = request["evidence_repairs"]["QUAL-001"]
+        self.assertEqual([r["id"] for r in context["verified_sources"]], ["R1"])
+        self.assertIn("missing_evidence_ids", {entry["rule"] for entry in context["diagnostics"]})
+
+    def test_dedup_failure_reports_exact_remaining_phase_and_preserves_audit(self):
+        findings = self.quality.assessments[0].findings
+        findings.append(findings[0].model_copy())
+        retained = self.result.decisions[0]
+        retained.decision, retained.final_severity = "confirmed", "medium"
+        retained.root_cause, retained.scope = "Timing", "Settlement"
+        retained.final_evidence = [FindingEvidence(requirement_id="R1", quote=TEXT,
+                                                   source="specification.md", paragraph=1)]
+        self.result.decisions.append(retained.model_copy(update={"finding_id": "QUAL-002"}))
+        with patch.object(auditor, "ask_gemini", side_effect=[
+            self.result.model_dump_json(), "{}", "{}", "{}", '{"merges":[]}',
+        ]) as api:
+            report = self.stream()[-1]
+            self.assertTrue(report["partial"])
+            self.assertEqual(report["audit_coverage"]["remaining_phase"], "deduplication")
+            self.assertEqual(report["audit_coverage"]["validated_count"], 2)
+            self.assertIsNone(report["readiness"])
+            self.assertEqual(len(report["native"]["finding_audit"]["decisions"]), 2)
+            for endpoint in ("/api/audit/pdf", "/api/audit/pdf?executive=true"):
+                response = self.http.post(endpoint, json=report["native"])
+                self.assertEqual(response.status_code, 200)
+                with pymupdf.open(stream=response.content) as pdf:
+                    self.assertIn("Незавершённый этап: объединение дубликатов.", " ".join(pdf[0].get_text().split()))
+            self.assert_recovered(self.stream(retry_token=report["auditor_retry"]["token"]))
+        self.assertIs(api.call_args.kwargs["response_schema"], auditor.AuditMergePlan)
+        self.assertEqual(api.call_count, 5)
+
     def test_incomplete_consistency_still_audits_findings_without_readiness(self):
         self.consistency.unresolved = [{"phase": "global", "code": "unresolved_candidates", "candidate_indices": [2]}]
         with patch.object(auditor, "ask_gemini", return_value=self.result.model_dump_json()) as audit:
@@ -189,7 +233,7 @@ class AuditorRecoveryTests(unittest.TestCase):
             if not recovery and "QUAL-029" in ids:
                 next(row for row in rows if row["finding_id"] == "QUAL-029")["requirement_ids"] = ["R99"]
             answer = {"decisions": rows}
-            if kwargs["response_schema"] is AuditResult:
+            if kwargs["response_schema"] is AuditCandidateResult:
                 answer.update(self.result.model_dump(mode="json", exclude={"decisions"}))
             return json.dumps(answer)
 

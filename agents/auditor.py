@@ -21,6 +21,7 @@ from core.models import (
     ExtractionResult,
     QualityAnalysisResult,
     ConsistencyAnalysisResult,
+    AuditCandidate, AuditCandidatePatch, AuditCandidateResult, FindingEvidence,
     AuditDecision, AuditResult, AuditSummary, AuditPatch, AuditMergePlan
 )
 
@@ -48,6 +49,7 @@ class AuditIssue:
     finding_id: str | None = None
     field: str | None = None
     origin: str | None = None
+    source_ids: tuple[str, ...] = ()
 
     @property
     def phase(self):
@@ -212,6 +214,10 @@ def decision_issues(decision, original, reqs):
     issues = []
     if not ids or len(ids) != len(decision.requirement_ids) or not ids <= reqs.keys():
         issues.append(AuditIssue("invalid_requirement_ids", fid, "requirement_ids"))
+    if len(ids) != len(decision.requirement_ids):
+        issues.append(AuditIssue("duplicate_requirement_ids", fid, "requirement_ids"))
+    if ids - reqs.keys():
+        issues.append(AuditIssue("unknown_requirement_ids", fid, "requirement_ids"))
     for field in ("title", "explanation", "recommendation", "audit_reason"):
         if not meaningful(getattr(decision, field)):
             issues.append(AuditIssue("missing_decision_text", fid, field))
@@ -234,17 +240,22 @@ def decision_issues(decision, original, reqs):
             issues.append(AuditIssue("unknown_evidence_requirement", fid, "final_evidence"))
             continue
         if not meaningful(item.quote) or norm(item.quote) not in norm(req.text):
-            issues.append(AuditIssue("invalid_quotation", fid, "final_evidence.quote"))
+            issues.append(AuditIssue("invalid_quotation", fid, "final_evidence.quote", source_ids=(req.id,)))
         if (item.source, item.page, item.paragraph) != (req.source, req.page, req.paragraph):
-            issues.append(AuditIssue("invalid_source_coordinates", fid, "final_evidence"))
+            issues.append(AuditIssue("invalid_source_coordinates", fid, "final_evidence", source_ids=(req.id,)))
         evidence_ids.add(req.id)
     if (decision.decision in RETAINED and original[fid].get("category") == "contradiction"
             and len(orig_ids) > 1 and len(ids & orig_ids) < 2):
-        issues.append(AuditIssue("missing_contradiction_side", fid, "final_evidence"))
-    if referenced_ids(decision.explanation, reqs) - evidence_ids:
-        issues.append(AuditIssue("unsupported_explanation_reference", fid, "explanation"))
+        issues.append(AuditIssue("missing_contradiction_side", fid, "final_evidence", source_ids=tuple(sorted(orig_ids - ids))))
+    if unsupported := referenced_ids(decision.explanation, reqs) - evidence_ids:
+        issues.append(AuditIssue("unsupported_explanation_reference", fid, "explanation",
+                                 source_ids=tuple(sorted(unsupported))))
     if evidence_ids != ids:
         issues.append(AuditIssue("incomplete_evidence_coverage", fid, "final_evidence"))
+    if missing := (ids - evidence_ids) & reqs.keys():
+        issues.append(AuditIssue("missing_evidence_ids", fid, "final_evidence", source_ids=tuple(sorted(missing))))
+    if unexpected := evidence_ids - ids:
+        issues.append(AuditIssue("unexpected_evidence_ids", fid, "final_evidence", source_ids=tuple(sorted(unexpected))))
     return issues
 
 
@@ -392,6 +403,62 @@ def schema_issues(error, fid=None):
             for issue in error.errors(include_input=False, include_context=False, include_url=False)]
 
 
+def materialize_candidate(candidate, original, reqs):
+    fid = candidate.finding_id
+    selected = candidate.evidence_ids
+    ids = set(selected)
+    orig_ids = set(original["requirement_ids"])
+    issues = []
+    if len(ids) != len(selected):
+        issues.append(AuditIssue("duplicate_requirement_ids", fid, "evidence_ids"))
+    if ids - reqs.keys():
+        issues.append(AuditIssue("unknown_requirement_ids", fid, "evidence_ids"))
+    if candidate.decision == "rejected":
+        if ids:
+            issues.append(AuditIssue("unexpected_evidence_ids", fid, "evidence_ids"))
+    else:
+        if not ids:
+            issues.append(AuditIssue("missing_evidence_ids", fid, "evidence_ids",
+                                     source_ids=tuple(sorted(orig_ids))))
+        if not ids & orig_ids:
+            issues.append(AuditIssue("unrelated_evidence_selection", fid, "evidence_ids",
+                                     source_ids=tuple(sorted(orig_ids))))
+        # Out-of-finding references must play an explicit role in the finding.
+        # A known ID by itself is not a justification for attaching its source.
+        extra = (ids & reqs.keys()) - orig_ids - referenced_ids(candidate.explanation, reqs)
+        if extra:
+            issues.append(AuditIssue("irrelevant_evidence_selection", fid, "evidence_ids",
+                                     source_ids=tuple(sorted(extra))))
+    if issues:
+        if candidate.decision != "rejected" and (unsupported := referenced_ids(candidate.explanation, reqs) - ids):
+            issues.append(AuditIssue("unsupported_explanation_reference", fid, "explanation",
+                                     source_ids=tuple(sorted(unsupported))))
+        return None, issues
+    evidence = [FindingEvidence(requirement_id=rid, quote=reqs[rid].text, source=reqs[rid].source,
+                                page=reqs[rid].page, paragraph=reqs[rid].paragraph) for rid in selected]
+    row = AuditDecision(**candidate.model_dump(exclude={"evidence_ids"}),
+                        requirement_ids=selected if candidate.decision != "rejected" else original["requirement_ids"],
+                        final_evidence=evidence)
+    return row, []
+
+
+def repair_entry(issue, reqs):
+    return {"rule": issue.rule, "field": issue.field,
+            "source_ids": [rid for rid in issue.source_ids if rid in reqs][:16]}
+
+
+def repair_payload(expected, repairs, original, reqs):
+    payload = {}
+    for fid in sorted(expected & repairs.keys()):
+        diagnostics = repairs[fid]
+        ids = list(dict.fromkeys([*original[fid]["requirement_ids"],
+                                 *(rid for issue in diagnostics for rid in issue["source_ids"])]))
+        payload[fid] = {"diagnostics": diagnostics,
+                        "verified_sources": [reqs[rid].model_dump(mode="json")
+                                             for rid in ids[:24] if rid in reqs]}
+    return payload
+
+
 def parse_rows(data, expected, original, reqs, independent_ids):
     rows = data.get("decisions")
     if not isinstance(rows, list):
@@ -409,7 +476,19 @@ def parse_rows(data, expected, original, reqs, independent_ids):
         if fid not in expected or counts[fid] != 1:
             continue
         try:
-            row = AuditDecision.model_validate(normalize_decision(raw))
+            normalized = normalize_decision(raw)
+            if "evidence_ids" not in raw and {"requirement_ids", "final_evidence"} <= raw.keys():
+                # Older responses and fixtures remain subject to the complete legacy validator.
+                row = AuditDecision.model_validate(normalized)
+            else:
+                candidate = AuditCandidate.model_validate(normalized)
+                if {"requirement_ids", "final_evidence"} & raw.keys():
+                    issues.append(AuditIssue("unexpected_evidence_fields", fid, "evidence_ids"))
+                    continue
+                row, invalid = materialize_candidate(candidate, original[fid], reqs)
+                if invalid:
+                    issues.extend(invalid)
+                    continue
         except ValidationError as error:
             issues.extend(schema_issues(error, fid))
             continue
@@ -440,8 +519,9 @@ def audit_request(payload, system, schema, stage, attempt):
     try:
         response = ask_gemini(prompt=json.dumps(payload, ensure_ascii=False),
                               system_instruction=system, model=model, response_schema=schema)
-    except GeminiRequestError:
-        logger.warning("Auditor %s attempt=%d/%d rule=provider_request_failed", stage, attempt, MAX_ATTEMPTS)
+    except GeminiRequestError as error:
+        logger.warning("Auditor %s attempt=%d/%d rule=provider_request_failed status=%s",
+                       stage, attempt, MAX_ATTEMPTS, error.code if type(error.code) is int else "unavailable")
         raise AuditorFailure("auditor_provider_failed") from None
     finally:
         if metrics is not None:
@@ -469,19 +549,18 @@ def log_issues(stage, attempt, issues):
 
 
 def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locked=(), saved_summary=None,
-                 independent_ids, exclusions):
+                 independent_ids, exclusions, repairs):
     original = {row["id"]: row for row in batch}
     summary = saved_summary
     retained = {row.finding_id: row for row in locked}
     issues = []
-    evidence_repairs = {}
     for attempt in range(1, MAX_ATTEMPTS + 1):
         expected = set(original) - retained.keys()
         want_summary = need_summary and summary is None
-        schema = AuditResult if want_summary else AuditPatch
+        schema = AuditCandidateResult if want_summary else AuditCandidatePatch
         scope = [row for row in batch if row["id"] in expected]
         payload = {**audit_input, "findings": scope, "overlap_hints": overlap_hints(scope)}
-        if attempt > 1 or locked or expected & independent_ids:
+        if attempt > 1 or locked or expected & (independent_ids | repairs.keys()):
             payload.update(
                 task=("Return the required audit summary and decisions for requested_finding_ids. "
                       "If no IDs are requested, return an empty decisions array. Locked decisions are context only."
@@ -490,9 +569,11 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locke
                 requested_finding_ids=sorted(expected),
                 locked_decisions=[row.model_dump(mode="json") for row in retained.values()],
                 validation_errors=[issue.describe() for issue in dict.fromkeys(issues)][:100],
-                evidence_repairs={fid: refs for fid, refs in evidence_repairs.items() if fid in expected},
-                evidence_repair_instruction="For each referenced source verify its relevance to the precise claim. "
-                "Attach exact evidence and justify the relationship in audit_reason, or revise unsupported wording.",
+                evidence_repairs=repair_payload(expected, repairs, original, reqs),
+                evidence_repair_instruction="Return each requested decision as one complete, consistent unit. "
+                "Select only relevant evidence_ids and justify the relationship to the claim in audit_reason. "
+                "Revise unsupported claims instead of attaching irrelevant source IDs. "
+                "Do not omit a material source reference merely to satisfy validation.",
             )
             if affected := sorted(expected & independent_ids):
                 payload.update(
@@ -507,10 +588,10 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locke
                     consistency_repair_ids=consistency_ids,
                     consistency_repair_instruction="Verify the cited rules and whether they support "
                     "the proposed defect. For a contradiction, compare both rules in the same scenario, "
-                    "including conditions, exceptions and scope. Quote both conflicting sides with "
-                    "exact requirement IDs and source coordinates and explain why they cannot both hold. "
-                    "If the sources do not support the candidate, revise only to a supported finding or "
-                    "give a source-based rejection reason using the original IDs and empty final_evidence.",
+                    "including conditions, exceptions and scope. Select the verified source IDs of both "
+                    "conflicting sides and explain why they cannot both hold. If the sources do not support "
+                    "the candidate, revise only to a supported finding or give a source-based rejection "
+                    "reason with empty evidence_ids.",
                 )
         try:
             data, issues = audit_request(payload, prompt, schema, stage, attempt)
@@ -524,22 +605,8 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locke
                 summary = AuditSummary.model_validate(data)
             except ValidationError as error:
                 issues.extend(schema_issues(error))
-        evidence_repairs = {}
-        rows = data.get("decisions")
-        for row in rows if isinstance(rows, list) else []:
-            if not isinstance(row, dict) or not isinstance(row.get("finding_id"), str):
-                continue
-            fid = row["finding_id"]
-            explanation = row.get("explanation")
-            if fid in expected and isinstance(explanation, str):
-                refs = referenced_ids(explanation, reqs)
-                if refs:
-                    evidence_repairs[fid] = [reqs[rid].model_dump(mode="json") for rid in sorted(refs)]
         parsed, row_issues = parse_rows(data, expected, original, reqs, independent_ids)
         issues.extend(row_issues)
-        unsupported = {issue.finding_id for issue in row_issues
-                       if issue.rule == "unsupported_explanation_reference"}
-        evidence_repairs = {fid: refs for fid, refs in evidence_repairs.items() if fid in unsupported}
         retained.update(parsed)
         # Review known-invalid links now, while allowing a missing representative
         # to arrive in a later response. Check representative relevance on full coverage.
@@ -551,8 +618,14 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locke
             fid = issue.finding_id
             if fid in original and fid not in retained:
                 exclusions.setdefault(fid, []).append(issue)
+                entry = repair_entry(issue, reqs)
+                repair_items = repairs.setdefault(fid, [])
+                if entry not in repair_items and len(repair_items) < 24:
+                    repair_items.append(entry)
                 if issue.rule in MERGE_FAILURE_RULES:
                     independent_ids.add(fid)
+        for fid in retained:
+            repairs.pop(fid, None)
         if issues:
             log_issues(stage, attempt, issues)
         # Unknown/unsolicited rows never enter the reconstructed result.
@@ -570,6 +643,8 @@ def review_global_groups(result, findings, extraction, new_ids=None, *, independ
     retained = sorted((d for d in result.decisions
                        if d.decision in RETAINED and d.finding_id not in independent_ids),
                       key=lambda d: (needs_human_review(d), -len(set(d.requirement_ids)), d.finding_id))
+    progress = audit_progress.get() if new_ids is None else None
+    reviewed_pairs = {tuple(pair) for pair in progress.get("reviewed_dedup_pairs", [])} if progress is not None else set()
     pairs = []
     for index, target in enumerate(retained):
         target_ids = set(target.requirement_ids)
@@ -592,7 +667,9 @@ def review_global_groups(result, findings, extraction, new_ids=None, *, independ
                 related = related or (category != "missing_requirement"
                                       and originals[target.finding_id].get("category") != "missing_requirement")
             if related and ids.intersection(target_ids, source["requirement_ids"]):
-                pairs.append((member.finding_id, target.finding_id))
+                pair = (member.finding_id, target.finding_id)
+                if pair not in reviewed_pairs:
+                    pairs.append(pair)
     for start in range(0, len(pairs), MAX_CROSS_BATCH_PAIRS):
         active = {d.finding_id for d in result.decisions if d.decision in RETAINED}
         allowed = {pair for pair in pairs[start:start + MAX_CROSS_BATCH_PAIRS] if set(pair) <= active}
@@ -602,6 +679,9 @@ def review_global_groups(result, findings, extraction, new_ids=None, *, independ
             except AuditorFailure as error:
                 error.valid_audit = result
                 raise
+            if progress is not None:
+                reviewed_pairs.update(allowed)
+                progress["reviewed_dedup_pairs"] = sorted(map(list, reviewed_pairs))
     return result
 
 
@@ -685,6 +765,8 @@ def audit_results(sections, extraction_result, quality_result, consistency_resul
         progress = {}
     independent_ids = set(progress.get("independent_review_ids", []))
     exclusions = {}
+    # Repair context contains only locally generated rule names and registry IDs.
+    repairs = {fid: list(items) for fid, items in progress.get("decision_repairs", {}).items()}
     stored = AuditPatch.model_validate({"decisions": progress.get("decisions", [])})
     decisions = salvage_decisions(stored.decisions, findings, extraction_result, exclusions=exclusions).decisions
     independent_ids.update(fid for fid, issues in exclusions.items()
@@ -705,7 +787,7 @@ def audit_results(sections, extraction_result, quality_result, consistency_resul
         try:
             header, rows = review_batch(audit_input, prompt, batch, reqs, f"batch={index + 1}/{len(batches)}",
                                         need_summary=index == 0, locked=locked, saved_summary=summary,
-                                        independent_ids=independent_ids, exclusions=exclusions)
+                                        independent_ids=independent_ids, exclusions=exclusions, repairs=repairs)
         except AuditorFailure as error:
             failure = error
             rows, header = getattr(error, "rows", locked), getattr(error, "summary", summary)
@@ -727,10 +809,16 @@ def audit_results(sections, extraction_result, quality_result, consistency_resul
         reasons = exclusions.get(fid) or [AuditIssue("missing_decision", fid)]
         if any(issue.rule in MERGE_FAILURE_RULES for issue in reasons):
             independent_ids.add(fid)
+        for issue in reasons:
+            entry = repair_entry(issue, reqs)
+            repair_items = repairs.setdefault(fid, [])
+            if entry not in repair_items and len(repair_items) < 24:
+                repair_items.append(entry)
         logger.warning("Auditor final salvage excluded decision: %s",
                        "; ".join(dict.fromkeys(issue.describe() for issue in reasons)))
     progress.update(
         independent_review_ids=sorted(independent_ids),
+        decision_repairs={fid: repairs[fid] for fid in sorted(repairs.keys() - accepted_ids)},
         decisions=patch.model_dump(mode="json")["decisions"],
         summary=summary.model_dump(mode="json") if summary else None,
         reviewed_ids=sorted(reviewed), completed_batches=completed_batches,
@@ -738,18 +826,20 @@ def audit_results(sections, extraction_result, quality_result, consistency_resul
         unresolved_ids=sorted((all_ids & reviewed) - accepted_ids),
         not_reviewed_ids=sorted(all_ids - reviewed - accepted_ids),
         deduplication_complete=False,
+        remaining_phase="finding_review" if accepted_ids != all_ids else "summary",
     )
     logger.info("Auditor disposition validated=%d unresolved=%d not_reviewed=%d",
                 len(accepted_ids), len(progress["unresolved_ids"]), len(progress["not_reviewed_ids"]))
     if summary is None or accepted_ids != all_ids:
         raise failure or AuditorFailure("auditor_validation_failed")
     result = validate_audit(AuditResult(**summary.model_dump(), decisions=patch.decisions), findings, extraction_result)
+    progress["remaining_phase"] = "deduplication"
     try:
         result = review_global_groups(result, findings, extraction_result, independent_ids=independent_ids)
     except AuditorFailure as error:
         progress["decisions"] = getattr(error, "valid_audit", result).model_dump(mode="json")["decisions"]
         raise
-    progress.update(decisions=result.model_dump(mode="json")["decisions"], deduplication_complete=True)
+    progress.update(decisions=result.model_dump(mode="json")["decisions"], deduplication_complete=True, remaining_phase="post_review")
     logger.info("Auditor validation passed: %d decisions across %d batches", len(result.decisions), len(batches))
     return apply_readiness_floor(result, logic_debug)
 

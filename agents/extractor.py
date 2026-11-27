@@ -3,7 +3,7 @@ import json
 import re
 from pathlib import Path
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from core.llm_client import ask_gemini
 from core.document_reader import read_document
 from core.models import ExtractionResult, Requirement
@@ -75,9 +75,11 @@ def extract_batch(sections, instruction):
             if not items:
                 print('[COVERAGE REVIEW] No spans selected in this batch')
             return [r for _, r in items]
+        except ValidationError:
+            error = 'invalid_span_schema'
         except ValueError as exc:
-            error = str(exc)
-            print(f'[SPAN RETRY] {attempt}/2: {type(error).__name__}')
+            error = str(exc)  # materialize reports only local span indices and fixed rule text.
+        print(f'[SPAN RETRY] {attempt}/2: {error}')
     raise ValueError(f'Source span validation failed: {error}')
 
 

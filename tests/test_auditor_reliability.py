@@ -11,7 +11,7 @@ from google.genai.errors import ClientError
 from agents import auditor
 from core import llm_client
 from core.llm_client import GeminiRequestError
-from core.models import AuditMergePlan, AuditPatch, AuditResult
+from core.models import AuditCandidatePatch, AuditCandidateResult, AuditMergePlan, AuditPatch
 from test_auditor_v08 import fixtures
 
 
@@ -197,7 +197,7 @@ class AuditorReliabilityTests(unittest.TestCase):
         with patch.dict(os.environ, {"AUDIT_BATCH_SIZE": "1"}), patch.object(auditor, "ask_gemini", side_effect=responses) as model:
             got = self.audit()
         self.assertEqual([call.kwargs["response_schema"] for call in model.call_args_list],
-                         [AuditResult, AuditPatch, AuditPatch, AuditMergePlan, AuditMergePlan])
+                         [AuditCandidateResult, AuditCandidatePatch, AuditCandidatePatch, AuditMergePlan, AuditMergePlan])
         self.assertEqual(got.decisions[0].merged_into, "CON-001")
         self.assertEqual(got.decisions[0].root_cause, got.decisions[1].root_cause)
         self.assertEqual([row.finding_id for row in got.decisions], ["QUAL-001", "CON-001", "CON-002"])

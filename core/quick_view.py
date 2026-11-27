@@ -44,6 +44,14 @@ def generate_quick_pdf(result, output_path, *, executive=False):
             reason = "Лимит проверки исчерпан."
         if partial == "source_coverage_incomplete":
             reason = "Часть исходного документа не прочитана."
+        phase = (result.audit_coverage or {}).get("remaining_phase")
+        phase_label = {
+            "deduplication": "Незавершённый этап: объединение дубликатов.",
+            "post_review": "Незавершённый этап: итоговая проверка.",
+            "summary": "Незавершённый этап: сводка аудита.",
+        }.get(phase)
+        if phase_label:
+            reason = phase_label
         add(label(reason) + ' ' + label('Независимый аудит не завершён. Готовность не оценена.'))
     else:
         add(label('Quick Validation — предварительный отчёт'), heading)

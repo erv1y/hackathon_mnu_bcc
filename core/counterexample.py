@@ -1,6 +1,7 @@
 """Direct, evidence-grounded pair review; AI conclusions remain candidates."""
 import json
 import math
+from collections import Counter
 from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel
@@ -111,16 +112,20 @@ def analyze_counterexamples(extraction, consistency, sections=None, debug=None):
         batch = pairs[offset:offset+PAIR_BATCH]
         entry = {'pass':f'batch_{offset//PAIR_BATCH+1}', 'attempts':[], 'status':'pending'}
         diagnostic['passes'].append(entry)
-        payload = {'pairs':[dict(p, requirements=[dict(reqs[i].model_dump(mode='json'), locked_expected_result=locked.get(i)) for i in p['requirement_ids']]) for p in batch],
-                   'source_sections':sections or []}
+        pair_payload = {p['pair_id']: dict(p, requirements=[
+            dict(reqs[i].model_dump(mode='json'), locked_expected_result=locked.get(i))
+            for i in p['requirement_ids']]) for p in batch}
+        pending = {p['pair_id']: p for p in batch}
+        retained = {}
+        payload = {'source_sections': sections or []}
         print(f'[DIRECT LOGIC] batch {offset//PAIR_BATCH+1}/{math.ceil(len(pairs)/PAIR_BATCH)}')
-        result = None
-        for attempt in range(1,3):
+        for attempt in range(1, 3):
+            payload['pairs'] = [pair_payload[pid] for pid in pending]
             try:
-                raw = ask_gemini(prompt=json.dumps(payload,ensure_ascii=False), system_instruction=instruction,
+                raw = ask_gemini(prompt=json.dumps(payload, ensure_ascii=False), system_instruction=instruction,
                                  model='gemini-3.5-flash-lite', response_schema=DirectResult)
             except Exception as exc:
-                entry['attempts'].append({'attempt':attempt,'error_type':type(exc).__name__})
+                entry['attempts'].append({'attempt': attempt, 'error_type': type(exc).__name__})
                 entry['status'] = 'api_failed'
                 print(f'[DIRECT REVIEW] API failed: {type(exc).__name__}')
                 break
@@ -128,21 +133,43 @@ def analyze_counterexamples(extraction, consistency, sections=None, debug=None):
                 raw = raw.strip()
                 if raw.startswith('```'):
                     raw = raw.removeprefix('```json').removeprefix('```').removesuffix('```').strip()
-                parsed = DirectResult.model_validate_json(raw)
-                validate_reviews(parsed, batch, reqs, locked)
-            except ValueError as exc:
-                entry['attempts'].append({'attempt':attempt, 'error':str(exc)})
-                payload = dict(payload, validation_error=str(exc))
-                print(f'[DIRECT CORRECTION] {type(exc).__name__}')
-                continue
-            result = parsed
-            entry['attempts'].append({'attempt':attempt,'status':'valid'})
-            break
-        if result is None:
-            if entry['status'] != 'api_failed': entry['status'] = 'validation_failed'
-            unresolved.extend(p['pair_id'] for p in batch)
-            continue
-        entry['status'] = 'checked'
+                rows = json.loads(raw)['reviews']
+                if not isinstance(rows, list):
+                    raise ValueError('invalid envelope')
+            except (ValueError, TypeError, KeyError, RecursionError):
+                rows = []
+            counts = Counter(row['pair_id'] for row in rows if isinstance(row, dict)
+                             and isinstance(row.get('pair_id'), str))
+            errors = {}
+            for row in rows:
+                pid = row.get('pair_id') if isinstance(row, dict) else None
+                if not isinstance(pid, str) or pid not in pending or counts[pid] != 1:
+                    continue
+                try:
+                    review = DirectReview.model_validate(row)
+                except ValueError:
+                    errors[pid] = 'invalid review schema'
+                    continue
+                try:
+                    validate_reviews(DirectResult(reviews=[review]), [pending[pid]], reqs, locked)
+                except ValueError as error:
+                    # validate_reviews emits only fixed rule text and verified identifiers.
+                    errors[pid] = str(error)
+                    continue
+                retained[pid] = review
+                del pending[pid]
+            if not pending:
+                entry['attempts'].append({'attempt': attempt, 'status': 'valid'})
+                break
+            for pid in pending:
+                errors.setdefault(pid, 'duplicate review' if counts[pid] > 1 else 'missing review')
+            entry['attempts'].append({'attempt': attempt, 'error': '; '.join(errors.values()), 'rules': errors})
+            payload['validation_error'] = errors
+            print(f'[DIRECT CORRECTION] {len(pending)} missing or invalid pair reviews')
+        if entry['status'] != 'api_failed':
+            entry['status'] = 'validation_failed' if pending else 'checked'
+        unresolved.extend(pending)
+        result = DirectResult(reviews=[retained[p['pair_id']] for p in batch if p['pair_id'] in retained])
         entry['reviews'] = result.model_dump(mode='json')['reviews']
         for r in result.reviews:
             if r.verdict == 'unresolved':

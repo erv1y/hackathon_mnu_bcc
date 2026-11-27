@@ -301,12 +301,12 @@ def run_auditor(state, extraction, quality, consistency, progress):
         progress.update(
             decisions=base.model_dump(mode="json")["decisions"],
             summary=base.model_dump(mode="json", exclude={"decisions"}),
-            deduplication_complete=True, post_review_complete=False,
+            deduplication_complete=True, post_review_complete=False, remaining_phase="post_review",
         )
         return {"audit_checkpoint": progress, "audit_failure_code":
                 error.code if isinstance(error, AuditorFailure) else "auditor_validation_failed",
                 "audit_models": models}
-    progress["post_review_complete"] = True
+    progress.update(post_review_complete=True, remaining_phase=None)
     review_debug['pre_review_audit'] = original_audit
     return {'consistency': consistency.model_dump(mode='json'), 'audit': normalize_audit(quality, consistency, result).model_dump(mode='json'), 'audit_models': models, 'release_review_debug': review_debug,
             'audit_checkpoint': progress, 'audit_failure_code': None}
@@ -539,6 +539,7 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
                     "summary_validated": checkpoint.get("summary") is not None,
                     "deduplication_complete": checkpoint.get("deduplication_complete", False),
                     "post_review_complete": False, "document_coverage_complete": False,
+                    "remaining_phase": checkpoint.get("remaining_phase", "finding_review"),
                     "readiness_eligible": False,
                     "rejected_ids": [d.finding_id for d in patch.decisions if d.decision == "rejected"],
                     "merged_ids": [d.finding_id for d in patch.decisions if d.decision == "merged"],
@@ -555,6 +556,7 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
                     "not_reviewed_ids": [], "completed_batches": checkpoint.get("completed_batches", []),
                     "incomplete_batches": [], "summary_validated": True,
                     "deduplication_complete": True, "post_review_complete": True,
+                    "remaining_phase": "consistency" if result.consistency.unresolved else None,
                     "document_coverage_complete": not result.consistency.unresolved,
                     "readiness_eligible": not result.consistency.unresolved,
                     "rejected_ids": [d.finding_id for d in result.audit.decisions if d.decision == "rejected"],

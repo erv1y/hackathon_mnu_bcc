@@ -95,26 +95,41 @@ def analyze_quality(extraction_result, sections=None):
         payload = {'target_ids': [r.id for r in targets],
                    'requirements': extraction_result.model_dump(mode='json')['requirements'],
                    'source_context': sections or []}
-        last_error = None
+        pending = {r.id: r for r in targets}
+        retained = {}
         print(f'[QUALITY BATCH] {index//BATCH_SIZE+1}/{total}')
         for attempt in range(1, MAX_ATTEMPTS+1):
             print(f'[AGENT 2] Validation attempt {attempt}/{MAX_ATTEMPTS}')
+            payload['target_ids'] = list(pending)
             response = ask_gemini(prompt=json.dumps(payload, ensure_ascii=False),
                 system_instruction=instruction, model='gemini-3.5-flash-lite',
                 response_schema=QualityCandidateResult)
             try:
-                data = json.loads(clean_response(response))
-                candidate = QualityCandidateResult.model_validate(data)
-                result = materialize(candidate, targets)
-                assessments.extend(result.assessments)
+                rows = json.loads(clean_response(response))['assessments']
+                if not isinstance(rows, list):
+                    raise ValueError('invalid envelope')
+            except (ValueError, TypeError, KeyError, RecursionError):
+                rows = []
+            counts = Counter(row['requirement_id'] for row in rows if isinstance(row, dict)
+                             and isinstance(row.get('requirement_id'), str))
+            for row in rows:
+                rid = row.get('requirement_id') if isinstance(row, dict) else None
+                if not isinstance(rid, str) or rid not in pending or counts[rid] != 1:
+                    continue
+                try:
+                    candidate = QualityAssessmentCandidate.model_validate(row)
+                    result = materialize(QualityCandidateResult(assessments=[candidate]), [pending[rid]])
+                except ValueError:
+                    continue
+                retained[rid] = result.assessments[0]
+                del pending[rid]
+            if not pending:
+                assessments.extend(retained[r.id] for r in targets)
                 break
-            except (ValueError, TypeError) as error:
-                last_error = error
-                print(f'[QUALITY CORRECTION] {type(error).__name__}')
-                payload['correction'] = {'error': str(error),
-                    'instruction': 'Return complete corrected assessments for the target IDs only.'}
+            print(f'[QUALITY CORRECTION] {len(pending)} missing or invalid assessments')
+            payload['correction'] = {'instruction': 'Return complete corrected assessments for the remaining target IDs only.'}
         else:
-            raise RuntimeError('Quality Analyst failed validation; no partial result accepted.') from last_error
+            raise RuntimeError('Quality Analyst failed validation; no partial result accepted.')
     result = validate_quality(QualityAnalysisResult(assessments=assessments), extraction_result)
     print(f'[AGENT 2] Analyzed {len(result.assessments)} requirements')
     print(f'[AGENT 2] Found {sum(len(a.findings) for a in result.assessments)} quality issues')
