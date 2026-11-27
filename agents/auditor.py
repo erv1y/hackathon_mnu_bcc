@@ -151,6 +151,7 @@ def normalize_decision(decision):
 
 
 RETAINED = {"confirmed", "revised"}
+MERGE_FAILURE_RULES = {"invalid_merge_target", "merge_root_cause_or_scope_mismatch", "merge_missing_shared_anchor"}
 READINESS_RANK = {"ready": 0, "conditionally_ready": 1, "not_ready": 2}
 
 
@@ -247,7 +248,7 @@ def decision_issues(decision, original, reqs):
     return issues
 
 
-def merge_issues(decisions, original):
+def merge_issues(decisions, original, *, allow_pending=False):
     groups = {}
     for row in decisions.values():
         if row.decision == "merged":
@@ -258,6 +259,8 @@ def merge_issues(decisions, original):
         orig_ids = set(original[fid]["requirement_ids"])
         if row.decision == "merged":
             target = decisions.get(row.merged_into)
+            if allow_pending and target is None and row.merged_into in original:
+                continue
             if target is None or target.finding_id == fid or target.decision not in RETAINED:
                 issues.append(AuditIssue("invalid_merge_target", fid, "merged_into"))
                 continue
@@ -266,7 +269,7 @@ def merge_issues(decisions, original):
                     issues.append(AuditIssue("merge_root_cause_or_scope_mismatch", fid, field))
             if not ids & orig_ids & set(target.requirement_ids):
                 issues.append(AuditIssue("merge_missing_shared_anchor", fid))
-        elif row.decision in RETAINED:
+        elif row.decision in RETAINED and not allow_pending:
             group_ids = orig_ids | {rid for member in groups.get(fid, ()) for rid in original[member.finding_id]["requirement_ids"]}
             if not ids & group_ids:
                 issues.append(AuditIssue("retained_finding_unrelated", fid, "requirement_ids"))
@@ -314,15 +317,27 @@ def validate_partial_audit(patch, findings, extraction):
     return validate_audit(patch, sources, extraction)
 
 
-def salvage_decisions(rows, findings, extraction):
+def salvage_decisions(rows, findings, extraction, *, exclusions=None):
     original = {row["id"]: row for row in findings}
     reqs = {row.id: row for row in extraction.requirements}
     counts = Counter(row.finding_id for row in rows)
-    accepted = {row.finding_id: row.model_copy(deep=True) for row in rows
-                if counts[row.finding_id] == 1 and row.finding_id in original
-                and not decision_issues(row, original, reqs)}
+    if exclusions is None:
+        exclusions = {}
+    accepted = {}
+    for row in rows:
+        fid = row.finding_id
+        if fid not in original:
+            logger.warning("Auditor salvage excluded decision: unexpected_finding_id")
+            continue
+        issues = ([AuditIssue("duplicate_decision", fid)] if counts[fid] > 1
+                  else decision_issues(row, original, reqs))
+        if issues:
+            exclusions.setdefault(fid, []).extend(issues)
+        else:
+            accepted[fid] = row.model_copy(deep=True)
     while issues := merge_issues(accepted, original):
         for issue in issues:
+            exclusions.setdefault(issue.finding_id, []).append(issue)
             accepted.pop(issue.finding_id, None)
     return validate_partial_audit(AuditPatch(decisions=list(accepted.values())), findings, extraction)
 
@@ -377,7 +392,7 @@ def schema_issues(error, fid=None):
             for issue in error.errors(include_input=False, include_context=False, include_url=False)]
 
 
-def parse_rows(data, expected, original, reqs):
+def parse_rows(data, expected, original, reqs, independent_ids):
     rows = data.get("decisions")
     if not isinstance(rows, list):
         return {}, [AuditIssue("invalid_decisions_array", field="decisions"),
@@ -399,6 +414,11 @@ def parse_rows(data, expected, original, reqs):
             issues.extend(schema_issues(error, fid))
             continue
         invalid = decision_issues(row, original, reqs)
+        if row.decision == "merged":
+            if fid in independent_ids:
+                invalid.append(AuditIssue("independent_review_requires_unmerged_decision", fid, "decision"))
+            elif any(issue.rule == "missing_merge_anchor_text" for issue in invalid):
+                independent_ids.add(fid)
         issues.extend(invalid)
         if not invalid:
             accepted[fid] = row
@@ -448,7 +468,8 @@ def log_issues(stage, attempt, issues):
                    " (additional violations omitted)" if len(distinct) > 30 else "")
 
 
-def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locked=(), saved_summary=None):
+def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locked=(), saved_summary=None,
+                 independent_ids, exclusions):
     original = {row["id"]: row for row in batch}
     summary = saved_summary
     retained = {row.finding_id: row for row in locked}
@@ -460,7 +481,7 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locke
         schema = AuditResult if want_summary else AuditPatch
         scope = [row for row in batch if row["id"] in expected]
         payload = {**audit_input, "findings": scope, "overlap_hints": overlap_hints(scope)}
-        if attempt > 1 or locked:
+        if attempt > 1 or locked or expected & independent_ids:
             payload.update(
                 task=("Return the required audit summary and decisions for requested_finding_ids. "
                       "If no IDs are requested, return an empty decisions array. Locked decisions are context only."
@@ -473,9 +494,29 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locke
                 evidence_repair_instruction="For each referenced source verify its relevance to the precise claim. "
                 "Attach exact evidence and justify the relationship in audit_reason, or revise unsupported wording.",
             )
+            if affected := sorted(expected & independent_ids):
+                payload.update(
+                    independent_review_ids=affected,
+                    independent_review_instruction="For these IDs return confirmed, revised, or rejected, "
+                    "with merged_into null. Review each candidate independently against verified source "
+                    "evidence. Explain the decision in audit_reason. Do not borrow root_cause or scope "
+                    "from another finding. Keep distinct defects separate.",
+                )
+            if consistency_ids := sorted(fid for fid in expected if original[fid]["agent"] == "consistency_analyst"):
+                payload.update(
+                    consistency_repair_ids=consistency_ids,
+                    consistency_repair_instruction="Verify the cited rules and whether they support "
+                    "the proposed defect. For a contradiction, compare both rules in the same scenario, "
+                    "including conditions, exceptions and scope. Quote both conflicting sides with "
+                    "exact requirement IDs and source coordinates and explain why they cannot both hold. "
+                    "If the sources do not support the candidate, revise only to a supported finding or "
+                    "give a source-based rejection reason using the original IDs and empty final_evidence.",
+                )
         try:
             data, issues = audit_request(payload, prompt, schema, stage, attempt)
         except AuditorFailure as error:
+            for fid in expected:
+                exclusions.setdefault(fid, []).append(AuditIssue(error.code, fid))
             error.rows, error.summary = list(retained.values()), summary
             raise
         if want_summary:
@@ -494,19 +535,24 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locke
                 refs = referenced_ids(explanation, reqs)
                 if refs:
                     evidence_repairs[fid] = [reqs[rid].model_dump(mode="json") for rid in sorted(refs)]
-        parsed, row_issues = parse_rows(data, expected, original, reqs)
+        parsed, row_issues = parse_rows(data, expected, original, reqs, independent_ids)
         issues.extend(row_issues)
         unsupported = {issue.finding_id for issue in row_issues
                        if issue.rule == "unsupported_explanation_reference"}
         evidence_repairs = {fid: refs for fid, refs in evidence_repairs.items() if fid in unsupported}
         retained.update(parsed)
-        # A temporarily missing representative must not invalidate otherwise valid
-        # merge decisions. Check group invariants once every local row is available.
-        if set(retained) == set(original):
-            invalid = merge_issues(retained, original)
-            for issue in invalid:
-                retained.pop(issue.finding_id, None)
-            issues.extend(invalid)
+        # Review known-invalid links now, while allowing a missing representative
+        # to arrive in a later response. Check representative relevance on full coverage.
+        invalid = merge_issues(retained, original, allow_pending=set(retained) != set(original))
+        for issue in invalid:
+            retained.pop(issue.finding_id, None)
+        issues.extend(invalid)
+        for issue in issues:
+            fid = issue.finding_id
+            if fid in original and fid not in retained:
+                exclusions.setdefault(fid, []).append(issue)
+                if issue.rule in MERGE_FAILURE_RULES:
+                    independent_ids.add(fid)
         if issues:
             log_issues(stage, attempt, issues)
         # Unknown/unsolicited rows never enter the reconstructed result.
@@ -517,10 +563,12 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary, locke
     raise error
 
 
-def review_global_groups(result, findings, extraction, new_ids=None):
+def review_global_groups(result, findings, extraction, new_ids=None, *, independent_ids=()):
     originals = {row["id"]: row for row in findings}
+    independent_ids = set(independent_ids) | set((audit_progress.get() or {}).get("independent_review_ids", []))
     # Prefer the representative documenting both sides, independently of input order.
-    retained = sorted((d for d in result.decisions if d.decision in RETAINED),
+    retained = sorted((d for d in result.decisions
+                       if d.decision in RETAINED and d.finding_id not in independent_ids),
                       key=lambda d: (needs_human_review(d), -len(set(d.requirement_ids)), d.finding_id))
     pairs = []
     for index, target in enumerate(retained):
@@ -635,8 +683,12 @@ def audit_results(sections, extraction_result, quality_result, consistency_resul
     progress = audit_progress.get()
     if progress is None:
         progress = {}
+    independent_ids = set(progress.get("independent_review_ids", []))
+    exclusions = {}
     stored = AuditPatch.model_validate({"decisions": progress.get("decisions", [])})
-    decisions = salvage_decisions(stored.decisions, findings, extraction_result).decisions
+    decisions = salvage_decisions(stored.decisions, findings, extraction_result, exclusions=exclusions).decisions
+    independent_ids.update(fid for fid, issues in exclusions.items()
+                           if any(issue.rule in MERGE_FAILURE_RULES for issue in issues))
     summary = AuditSummary.model_validate(progress["summary"]) if progress.get("summary") else None
     reviewed = set(progress.get("reviewed_ids", []))
     completed_batches = []
@@ -652,7 +704,8 @@ def audit_results(sections, extraction_result, quality_result, consistency_resul
             continue
         try:
             header, rows = review_batch(audit_input, prompt, batch, reqs, f"batch={index + 1}/{len(batches)}",
-                                        need_summary=index == 0, locked=locked, saved_summary=summary)
+                                        need_summary=index == 0, locked=locked, saved_summary=summary,
+                                        independent_ids=independent_ids, exclusions=exclusions)
         except AuditorFailure as error:
             failure = error
             rows, header = getattr(error, "rows", locked), getattr(error, "summary", summary)
@@ -667,10 +720,17 @@ def audit_results(sections, extraction_result, quality_result, consistency_resul
         if failure and failure.code in ("auditor_provider_failed", "auditor_budget_exhausted"):
             break
 
-    patch = salvage_decisions(decisions, findings, extraction_result)
+    patch = salvage_decisions(decisions, findings, extraction_result, exclusions=exclusions)
     accepted_ids = {row.finding_id for row in patch.decisions}
     all_ids = {row["id"] for row in findings}
+    for fid in sorted((reviewed | exclusions.keys()) - accepted_ids):
+        reasons = exclusions.get(fid) or [AuditIssue("missing_decision", fid)]
+        if any(issue.rule in MERGE_FAILURE_RULES for issue in reasons):
+            independent_ids.add(fid)
+        logger.warning("Auditor final salvage excluded decision: %s",
+                       "; ".join(dict.fromkeys(issue.describe() for issue in reasons)))
     progress.update(
+        independent_review_ids=sorted(independent_ids),
         decisions=patch.model_dump(mode="json")["decisions"],
         summary=summary.model_dump(mode="json") if summary else None,
         reviewed_ids=sorted(reviewed), completed_batches=completed_batches,
@@ -685,7 +745,7 @@ def audit_results(sections, extraction_result, quality_result, consistency_resul
         raise failure or AuditorFailure("auditor_validation_failed")
     result = validate_audit(AuditResult(**summary.model_dump(), decisions=patch.decisions), findings, extraction_result)
     try:
-        result = review_global_groups(result, findings, extraction_result)
+        result = review_global_groups(result, findings, extraction_result, independent_ids=independent_ids)
     except AuditorFailure as error:
         progress["decisions"] = getattr(error, "valid_audit", result).model_dump(mode="json")["decisions"]
         raise

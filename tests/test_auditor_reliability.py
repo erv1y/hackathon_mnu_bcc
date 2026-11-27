@@ -73,6 +73,67 @@ class AuditorReliabilityTests(unittest.TestCase):
         for secret in ("private fabricated quotation", "secret unknown label", "must not appear"):
             self.assertNotIn(secret, logs)
 
+    def test_merge_mismatch_requires_independent_evidence_based_correction(self):
+        attempted = self.result.model_copy(deep=True)
+        quality_row = attempted.decisions[0]
+        quality_row.decision, quality_row.final_severity, quality_row.merged_into = "confirmed", "high", None
+        member = attempted.decisions[1]
+        member.decision, member.final_severity, member.merged_into = "merged", None, "CON-002"
+        # Even a syntactically valid merge must be rejected during independent repair.
+        repeated = member.model_copy(update={"root_cause": attempted.decisions[2].root_cause})
+        one_sided = self.result.decisions[1].model_copy(update={
+            "requirement_ids": ["R1"], "final_evidence": member.final_evidence[:1],
+        })
+        for invalid, rule in ((repeated, "independent_review_requires_unmerged_decision"),
+                              (one_sided, "missing_contradiction_side")):
+            with self.subTest(rule=rule):
+                responses = [attempted.model_dump_json(), AuditPatch(decisions=[invalid]).model_dump_json(),
+                             AuditPatch(decisions=[self.result.decisions[1]]).model_dump_json()]
+                with patch.object(auditor, "ask_gemini", side_effect=responses) as model:
+                    with self.assertLogs("agents.auditor", level="WARNING") as logs:
+                        got = self.audit()
+                self.assertEqual(model.call_count, 3)
+                self.assertEqual(got.decisions, [quality_row, *self.result.decisions[1:]])
+                for call in model.call_args_list[1:]:
+                    request = json.loads(call.kwargs["prompt"])
+                    self.assertEqual(request["requested_finding_ids"], ["CON-001"])
+                    self.assertEqual(request["independent_review_ids"], ["CON-001"])
+                    self.assertEqual(request["consistency_repair_ids"], ["CON-001"])
+                    self.assertIn("confirmed, revised, or rejected", request["independent_review_instruction"])
+                    self.assertEqual([d["finding_id"] for d in request["locked_decisions"]],
+                                     ["QUAL-001", "CON-002"])
+                self.assertIn("merge_root_cause_or_scope_mismatch finding=CON-001 field=root_cause",
+                              logs.output[0])
+                self.assertIn(rule, logs.output[1])
+
+    def test_merge_mismatch_salvage_and_checkpoint_after_provider_failure(self):
+        attempted = self.result.model_copy(deep=True)
+        affected = attempted.decisions[1]
+        affected.decision, affected.final_severity, affected.merged_into = "merged", None, "CON-002"
+        quality_row = attempted.decisions[0]
+        quality_row.decision, quality_row.final_severity, quality_row.merged_into = "confirmed", "high", None
+        progress = {}
+        token = auditor.audit_progress.set(progress)
+        self.addCleanup(auditor.audit_progress.reset, token)
+        unavailable = GeminiRequestError("provider fallback exhausted")
+        with patch.object(auditor, "ask_gemini", side_effect=[attempted.model_dump_json(), unavailable]):
+            with self.assertLogs("agents.auditor", level="WARNING") as logs:
+                with self.assertRaises(auditor.AuditorFailure):
+                    self.audit()
+        excluded = next(line for line in logs.output if "final salvage excluded" in line)
+        self.assertIn("merge_root_cause_or_scope_mismatch finding=CON-001 field=root_cause", excluded)
+        self.assertIn("auditor_provider_failed finding=CON-001", excluded)
+        self.assertEqual(progress["unresolved_ids"], ["CON-001"])
+        self.assertEqual(progress["independent_review_ids"], ["CON-001"])
+        self.assertEqual([d["finding_id"] for d in progress["decisions"]], ["QUAL-001", "CON-002"])
+        correction = AuditPatch(decisions=[self.result.decisions[1]])
+        with patch.object(auditor, "ask_gemini", return_value=correction.model_dump_json()) as model:
+            got = self.audit()
+        model.assert_called_once()
+        request = json.loads(model.call_args.kwargs["prompt"])
+        self.assertEqual(request["independent_review_ids"], ["CON-001"])
+        self.assertEqual(got.decisions[1], self.result.decisions[1])
+
     def test_missing_summary_retry_does_not_reaudit_valid_decisions(self):
         first = {"decisions": self.result.model_dump()["decisions"]}
         repair = self.result.model_dump()
