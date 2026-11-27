@@ -7,6 +7,7 @@ from core.pdf_labels import pdf_label
 
 
 def generate_quick_pdf(result, output_path, *, executive=False):
+    from core.report_generator import draw_report_frame
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.pagesizes import A4
@@ -27,6 +28,9 @@ def generate_quick_pdf(result, output_path, *, executive=False):
     language = getattr(result, "passport", {}).get("language", "ru")
     def label(value):
         return pdf_label(value, language)
+
+    def frame(canvas, document):
+        draw_report_frame(canvas, document.page, language, font="QuickUnicode")
 
     partial = getattr(result, 'auditor_failure', None)
     if partial:
@@ -58,7 +62,9 @@ def generate_quick_pdf(result, output_path, *, executive=False):
             add(f"{label('Исходные замечания')} · {counts['raw']}")
             add(f"{label('Группы замечаний')} · {counts['grouped']}")
         for decision in finding_audit.decisions:
-            add(f"{decision.finding_id} | {decision.decision} | {decision.title}")
+            decision_label = {"confirmed": "Подтверждено", "revised": "Скорректировано",
+                              "merged": "Объединено", "rejected": "Отклонено"}
+            add(f"{decision.finding_id} | {label(decision_label[decision.decision])} | {decision.title}")
             if decision.merged_into:
                 add(f"{label('Объединено с')} {decision.merged_into}")
             if decision.decision in ("confirmed", "revised"):
@@ -73,7 +79,7 @@ def generate_quick_pdf(result, output_path, *, executive=False):
             for requirement in result.extraction.requirements:
                 add(f"{requirement.id} | {requirement.source}")
                 add(requirement.text)
-        SimpleDocTemplate(str(path), pagesize=A4, title="Deep Validation - Partial").build(story)
+        SimpleDocTemplate(str(path), pagesize=A4, title="Deep Validation - Partial").build(story, onFirstPage=frame, onLaterPages=frame)
         return path
     add(f'Время текущего запуска: {result.execution_time_seconds} сек.')
     add(f'Требований: {len(result.extraction.requirements)}; замечаний качества: {sum(len(a.findings) for a in result.quality.assessments)}; замечаний согласованности: {len(result.consistency.findings)}. Эти категории могут пересекаться.')
@@ -95,7 +101,7 @@ def generate_quick_pdf(result, output_path, *, executive=False):
         for e in f.evidence:
             add(f'{e.requirement_id} | {e.source} | стр. {e.page or "—"}, абз. {e.paragraph or "—"}: {e.quote}')
         add(f'Рекомендация: {f.recommendation}')
-    SimpleDocTemplate(str(path), pagesize=A4, title='Deep Validation - Partial' if partial else 'Quick Validation - Preliminary').build(story)
+    SimpleDocTemplate(str(path), pagesize=A4, title='Deep Validation - Partial' if partial else 'Quick Validation - Preliminary').build(story, onFirstPage=frame, onLaterPages=frame)
     return path
 
 

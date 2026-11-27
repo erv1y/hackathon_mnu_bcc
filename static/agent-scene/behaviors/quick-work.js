@@ -64,6 +64,14 @@ export class QuickAgent {
         T.wait(rand(3, 5), null, "sceneStatusGaming"),
         T.call(() => { a.base.lean = 0; }),
       );
+    } else if (roll < 0.84) {
+      a.queue(
+        T.call(() => { a.base.game = 0; this.holdPad(false); }),
+        T.goto("window", "sceneStatusWaiting"),
+        T.wait(1.6),
+        T.sit(this.home.seat, "sceneStatusGaming"),
+        T.call(() => { this.holdPad(true); a.base.game = 1; }),
+      );
     } else {
       a.queue(T.call(() => this.ctx.overlay.say(a, this.ctx.t(pick(IDLE_PHRASES)), 3)));
     }
@@ -82,6 +90,7 @@ export class QuickAgent {
     if (a.character.handR.children.includes(this.home.can)) this.holdCan(false);
     this.phoneTarget = 1;
     a.queue(
+      T.sit(this.home.seat, "sceneStatusNotice"),
       T.wait(0.2, null, "sceneStatusNotice"),
       T.call(() => { this.ctx.overlay.say(a, this.ctx.t("scenePhoneNotice"), 2, "pipeline"); a.base.look = -0.6; }),
       T.wait(0.7),

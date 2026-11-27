@@ -5,7 +5,7 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 from urllib.parse import unquote
 
 from dotenv import load_dotenv
@@ -484,6 +484,29 @@ async def demo(request: Request, language: Language = "ru", mode: CheckMode = "d
         for case in (before, after)
     ]
     return JSONResponse({"before": results[0], "after": results[1]}, headers=NO_STORE)
+
+
+@app.get("/api/demo/pdf")
+async def demo_pdf(request: Request, language: Language = "ru", mode: CheckMode = "deep",
+                   version: Literal["before", "after"] = "before", executive: bool = True,
+                   x_demo_password: Optional[str] = Header(default="")):
+    _check_auth(x_demo_password)
+    data = request.app.state.demo.get(language)
+    if not data:
+        raise HTTPException(404, "Demo unavailable.")
+    before, after, replay = data
+    case = before if version == "before" else after
+
+    def render():
+        from core.replay_pdf import render_replay_pdf
+        report = replay_report(case, replay, request.app.state.settings, check_mode=mode)
+        with TemporaryDirectory(prefix="requiragents-replay-") as folder:
+            path = Path(folder) / "demo.pdf"
+            render_replay_pdf(report, case.title, path, executive=executive)
+            return path.read_bytes()
+
+    return Response(await run_in_threadpool(render), media_type="application/pdf",
+                    headers={**NO_STORE, "Content-Disposition": 'attachment; filename="requiragents-demo.pdf"'})
 
 
 @app.post("/api/audit/ask")

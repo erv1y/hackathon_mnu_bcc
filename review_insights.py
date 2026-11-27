@@ -250,7 +250,7 @@ def build_insights(bundle: DocumentBundle, findings: list[dict], profile: AuditP
         alternatives = grounded_options(evidence)
         conditional = bool(alternatives or item.get("action_kind") == "business_decision"
                            or item["criterion_id"] in {
-                               "correctness", "contradiction", "inconsistent_constraint", "scope_conflict",
+                               "correctness", "contradiction", "spec.contradiction", "inconsistent_constraint", "scope_conflict",
                                "missing_requirement", "missing_dependency", "unambiguity", "clarity",
                                "completeness", "verifiability", "feasibility",
                            })

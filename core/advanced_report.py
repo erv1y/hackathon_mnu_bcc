@@ -100,13 +100,22 @@ def append_sections(result, output_path, base_generator):
         rows.append([rid,location(mapping.get(rid, r.model_dump())),f'{status_names.get(a.status, a.status)} / {a.quality_score}' if a else 'нет оценки','\n'.join(issues[rid]) or 'Нет сохранённых замечаний'])
     table(rows,[82,115,80,218])
     if not hasattr(result,'audit'): add('Предварительные замечания: независимый аудит не завершён; категории могут пересекаться.')
+    from core.report_generator import draw_report_frame
     with TemporaryDirectory() as tmp:
         base=Path(tmp)/'base.pdf'; appendix=Path(tmp)/'appendix.pdf'
         base_generator(result,base)
-        SimpleDocTemplate(str(appendix),pagesize=A4,leftMargin=50,rightMargin=50,topMargin=42,bottomMargin=42).build(story)
-        with fitz.open(str(base)) as doc, fitz.open(str(appendix)) as extra:
-            doc.insert_pdf(extra)
-            doc.save(str(target))
+        with fitz.open(str(base)) as doc:
+            preceding = len(doc)
+
+            def frame(canvas, document):
+                draw_report_frame(canvas, preceding + document.page, language, font="PassportUnicode",
+                                  footer=pdf_label("Паспорт прогона", language))
+
+            SimpleDocTemplate(str(appendix), pagesize=A4, leftMargin=50, rightMargin=50,
+                              topMargin=48, bottomMargin=46).build(story, onFirstPage=frame, onLaterPages=frame)
+            with fitz.open(str(appendix)) as extra:
+                doc.insert_pdf(extra)
+                doc.save(str(target))
     return target
 
 

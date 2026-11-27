@@ -3,6 +3,9 @@
 // Интерфейсные тексты. Порядок значений: русский, қазақша, English.
 const LOCALES = { ru: "ru-RU", kk: "kk-KZ", en: "en-GB" };
 const UI_TEXT = {
+  scenePreview: ["Показать 3D-сцену", "3D көрінісін көрсету", "Show 3D scene"],
+  scenePreviewClose: ["Вернуться к проверке", "Тексеруге оралу", "Return to audit"],
+
   verifyResolution: ["Подтвердить исправление", "Түзетуді растау", "Confirm resolution"],
   confirmResolution: ["Я проверил изменения в исходном тексте и подтверждаю, что причина замечания устранена.", "Бастапқы мәтіндегі өзгерістерді тексердім және мәселенің себебі жойылғанын растаймын.", "I checked the changed source text and confirm the cause of this finding was resolved."],
 

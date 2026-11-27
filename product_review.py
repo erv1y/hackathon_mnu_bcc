@@ -18,7 +18,13 @@ def group_findings(findings):
             (str(q.get("file_id") or q.get("file_name") or ""), str(q.get("start")), str(q.get("end")),
              normalized(q["text"])) for q in row.get("evidence", [])
         }))
-        substance = tuple(normalized(row.get(key)) for key in ("issue", "suggestion"))
+        cause = normalized(row.get("root_cause"))
+        scope = normalized(row.get("scope"))
+        resolution = normalized(row.get("suggestion"))
+        # Auditor provenance can establish a shared root cause even when the
+        # display explanations use different wording. Require identical scope
+        # and proposed correction in addition to the evidence below.
+        substance = (cause, scope, resolution) if cause and scope else (normalized(row.get("issue")), resolution)
         key = (row.get("criterion_id"), tuple(sorted(row.get("requirement_ids", []))), evidence,
                substance, row.get("review_reason"), row.get("action_kind"))
         if row.get("verified") != "exact" or not evidence or not all(substance):

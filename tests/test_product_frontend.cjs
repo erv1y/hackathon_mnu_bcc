@@ -54,3 +54,16 @@ test("CSV and Excel outputs treat spreadsheet formulas as text", () => {
   assert.match(excel, /&lt;evidence&gt;/);
   assert.doesNotMatch(excel, /ss:Formula/);
 });
+
+test("legacy demo conflicts only map quotes contained in one verified requirement", () => {
+  const legacy = { ...row, criterion_id: "spec.contradiction", requirementRanges: [
+    { id: "R1", start: 0, end: first.length },
+    { id: "R2", start: first.length + 1, end: source.length },
+  ], evidence: row.evidence.map(({ requirement_id, ...proof }) => proof) };
+  const targets = plain(context.conflictTargets(legacy, source));
+  assert.deepEqual(targets.map((target) => target.requirementId), ["R1", "R2"]);
+  assert.equal(context.conflictTargets(legacy, source.replace("100,000", "200,000")).length, 0);
+  assert.equal(context.conflictTargets({ ...legacy, requirementRanges: [
+    ...legacy.requirementRanges, { id: "other", start: 0, end: source.length },
+  ] }, source).length, 0);
+});

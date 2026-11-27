@@ -36,38 +36,44 @@ function gameTexture() {
     const frame = Math.floor(t * 14);
     if (frame === last) return;
     last = frame;
-    const sky = ctx.createLinearGradient(0, 0, 0, 108);
-    sky.addColorStop(0, "#" + palette.soft.getHexString());
-    sky.addColorStop(1, "#" + palette.softer.getHexString());
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, 192, 108);
-    ctx.fillStyle = "#ffffff";
-    for (let i = 0; i < 3; i += 1) {
-      const x = ((i * 80 - t * 12) % 240 + 240) % 240 - 30;
-      ctx.beginPath(); ctx.ellipse(x, 20 + i * 9, 18, 7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#d3e6da";
+    ctx.fillRect(0, 0, 192, 55);
+    ctx.fillStyle = "#edf0d6";
+    ctx.beginPath();
+    ctx.arc(143, 25, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#728e72";
+    ctx.fillRect(0, 53, 192, 55);
+    for (let i = 0; i < 10; i += 1) {
+      const x = i * 21 - 6;
+      const h = 8 + (i * 13) % 21;
+      ctx.fillStyle = i % 2 ? "#669185" : "#9aa991";
+      ctx.fillRect(x, 53 - h, 12 + (i % 3) * 3, h);
     }
-    ctx.fillStyle = "#" + palette.plant.getHexString();
-    ctx.fillRect(0, 84, 192, 24);
-    ctx.fillStyle = "#" + palette.mint.getHexString();
-    for (let i = 0; i < 6; i += 1) {
-      const x = ((i * 44 - t * 40) % 264 + 264) % 264 - 30;
-      ctx.fillRect(x, 70 - (i % 2) * 16, 26, 8);
-    }
-    ctx.fillStyle = "#f2c94c";
+    const bend = Math.sin(t * .65) * 17;
+    ctx.fillStyle = "#424d48";
+    ctx.beginPath();
+    ctx.moveTo(86 + bend, 53);
+    ctx.lineTo(105 + bend, 53);
+    ctx.lineTo(180, 108);
+    ctx.lineTo(12, 108);
+    ctx.fill();
+    ctx.fillStyle = "#f5dda7";
     for (let i = 0; i < 5; i += 1) {
-      const x = ((i * 52 + 30 - t * 40) % 260 + 260) % 260 - 20;
-      ctx.beginPath(); ctx.arc(x, 52 + Math.sin(t * 4 + i) * 4, 4, 0, Math.PI * 2); ctx.fill();
+      const phase = (i / 5 + t * .66) % 1;
+      const depth = phase * phase;
+      ctx.fillRect(95 + bend * (1 - depth), 54 + depth * 48, 1 + depth * 3, 2 + depth * 7);
     }
-    const jump = Math.max(0, Math.sin(t * 3.2)) * 30;
-    ctx.fillStyle = "#" + palette.action.getHexString();
-    ctx.fillRect(48, 66 - jump, 16, 18);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(56, 70 - jump, 4, 4);
-    ctx.fillStyle = "rgba(23,19,31,.55)";
-    ctx.fillRect(140, 6, 46, 12);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 9px sans-serif";
-    ctx.fillText(String(1200 + (frame % 900)).padStart(5, "0"), 146, 15);
+    const carX = 95 + Math.sin(t * 1.1) * 10;
+    ctx.fillStyle = "#203931";
+    ctx.fillRect(carX - 11, 88, 22, 14);
+    ctx.fillStyle = "#dc9567";
+    ctx.fillRect(carX - 10, 91, 20, 8);
+    ctx.fillStyle = "#b9d8d5";
+    ctx.fillRect(carX - 7, 89, 14, 4);
+    ctx.fillStyle = "#ffe0ae";
+    ctx.fillRect(carX - 9, 97, 4, 2);
+    ctx.fillRect(carX + 5, 97, 4, 2);
     texture.needsUpdate = true;
   }
   return { texture, draw };
@@ -96,6 +102,12 @@ export function buildApartment(p) {
   // ТВ на тумбе, развернут к дивану.
   const tvYaw = (-18 * Math.PI) / 180;
   add(P.tvStand(p), 2.3, 0, -2.6, tvYaw);
+  const consoleBody = group(
+    place(rbox(.29, .36, .18, p.white, .035), 0, .18, 0),
+    place(rbox(.12, .34, .19, p.dark, .02), 0, .18, .01),
+    place(rbox(.028, .13, .005, p.mint, .002), .03, .24, .11),
+  );
+  add(consoleBody, 3.13, .49, -2.56, tvYaw);
   const tvNode = add(P.tv(p), 2.3, 1.0, -2.6, tvYaw);
   const game = gameTexture();
   tvNode.userData.screen.map = game.texture;
@@ -134,7 +146,10 @@ export function buildApartment(p) {
 
   const seatPos = local(-0.42, 0.08);
   const front = local(-0.42, 0.75);
-  const graph = new Graph({ sofa: [front.x, front.z] }, []);
+  const aisle = local(-1.17, .75);
+  const look = local(-1.17, 1.34);
+  const graph = new Graph({ sofa: [front.x, front.z], aisle: [aisle.x, aisle.z], window: [look.x, look.z] },
+                          [["sofa", "aisle"], ["aisle", "window"]]);
   const seat = { node: "sofa", x: seatPos.x, z: seatPos.z, yaw: SOFA.yaw, h: 0.44 };
 
   return {

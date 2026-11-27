@@ -722,7 +722,7 @@ function renderReport() {
   $("result-meta").textContent = [
     source, msg(checkModeKey(reportMode(audit))),
     local ? msg("ruleReview") : audit.native?.passport.run_kind === "cache_hit" ? msg("cachedRun") : msg("completed", { done, total }),
-    audit.native && (quick || audit.auditor_failure) ? msg("quickEstimateNotice") : "",
+    audit.native && (quick || audit.auditor_failure && !audit.finding_audit_completed) ? msg("quickEstimateNotice") : "",
     msg("characters", { n: number(audit.spec_chars) }),
   ].filter(Boolean).join(" · ");
   show($("quick-followup"), quick);
@@ -768,8 +768,8 @@ function readinessText(report) {
 function renderNativeTrace(audit) {
   show($("native-status"), Boolean(audit.native),
     `${readinessText(audit)} · ${audit.elapsed_sec} s · ${({new: msg("runNew"), resume: msg("runResume"), cache_hit: msg("cachedRun")}[audit.native?.passport.run_kind] || "")}`);
-  show($("executive-pdf-btn"), Boolean(audit.native && (audit.independent_audit || audit.finding_audit_completed)));
-  show($("native-pdf-btn"), Boolean(audit.native));
+  show($("executive-pdf-btn"), Boolean(audit.mode === "replay" || audit.native && (audit.independent_audit || audit.finding_audit_completed)));
+  show($("native-pdf-btn"), Boolean(audit.native || audit.mode === "replay"));
   const decisionKeys = {confirmed: "auditConfirmed", revised: "auditRevised", merged: "auditMerged", rejected: "auditRejected"};
   const decisions = audit.native?.audit?.decisions || audit.native?.finding_audit?.decisions || [];
   show($("native-audit"), decisions.length > 0);
@@ -1187,9 +1187,15 @@ function bindAuditControls() {
   });
   for (const id of ["native-pdf-btn", "executive-pdf-btn"]) $(id).addEventListener("click", async () => {
     try {
-      const response = await fetch("/api/audit/pdf" + (id === "executive-pdf-btn" ? "?executive=true" : ""), {method: "POST",
-        headers: {...authHeaders(), "Content-Type": "application/json"},
-        body: JSON.stringify(state.audit.native)});
+      const executive = id === "executive-pdf-btn";
+      const replay = state.audit.mode === "replay";
+      const query = new URLSearchParams({ executive, language: state.audit.language,
+        mode: reportMode(state.audit), version: state.demoVersion || "before" });
+      const response = replay
+        ? await fetch("/api/demo/pdf?" + query, {headers: authHeaders()})
+        : await fetch("/api/audit/pdf?" + query, {method: "POST",
+          headers: {...authHeaders(), "Content-Type": "application/json"},
+          body: JSON.stringify(state.audit.native)});
       if (!response.ok) throw new Error(await responseError(response));
       download(await response.blob(), "application/pdf", "pdf",
         id === "executive-pdf-btn" ? "requiragents-executive" : state.audit.report_format.filename);

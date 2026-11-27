@@ -22,6 +22,33 @@ class GraphWebTests(unittest.TestCase):
         self.enterContext(patch.multiple(web, API_KEY="mock-key", DEMO_ONLY=False))
         self.http = self.enterContext(TestClient(web.app))
 
+    def test_demo_receipt_evidence_and_downloadable_replay_reports(self):
+        response = self.http.get("/api/demo", params={"language": "ru"})
+        self.assertEqual(response.status_code, 200)
+        report = response.json()["before"]["report"]
+        finding = next(row for module in report["modules"] for row in module["defects"]
+                       if row["criterion_id"] == "spec.contradiction")
+        self.assertEqual(finding["verified"], "exact")
+        self.assertEqual(len(finding["requirement_ids"]), 2)
+        self.assertTrue(any(q["finding_id"] == finding["id"] for q in report["insights"]["questions"]))
+        source = report["document"]["text"]
+        for proof in finding["evidence"]:
+            self.assertEqual(source[proof["start"]:proof["end"]], proof["text"])
+            self.assertEqual(sum(row["start"] <= proof["start"] < proof["end"] <= row["end"]
+                                 for row in report["document"]["requirements"]), 1)
+        for executive in ("true", "false"):
+            pdf = self.http.get("/api/demo/pdf", params={"language": "ru", "executive": executive})
+            self.assertEqual(pdf.status_code, 200)
+            with pymupdf.open(stream=pdf.content, filetype="pdf") as doc:
+                text = " ".join(word for page in doc for word in page.get_text().split())
+                self.assertIn("Сохранённый демонстрационный пример", text)
+                self.assertIn("Готовность не оценена", text)
+                self.assertTrue(all(page.get_text().strip() for page in doc))
+                if executive == "true":
+                    self.assertLessEqual(len(doc), 2)
+                else:
+                    self.assertIn("Реестр требований", text)
+
     def test_deep_upload_runs_parallel_nodes_and_exports_native_report(self):
         pdf_quote = "The daily transfer limit is 500 USD per account."
         docx_quote = "The daily transfer limit is 100 USD per account."

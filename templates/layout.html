@@ -6,19 +6,19 @@
   <meta name="description" content="Проверьте техническое задание до разработки. Найдите риски в платежах, защите данных и требованиях и получите варианты исправлений.">
   <title>{{ title }}</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/static/style.css?v=15">
+  <link rel="stylesheet" href="/static/style.css?v=16">
   <link rel="stylesheet" href="/static/motion.css?v=6">
-  <link rel="stylesheet" href="/static/agent-scene.css?v=1">
+  <link rel="stylesheet" href="/static/agent-scene.css?v=3">
   <script src="/static/motion.js?v=6" defer blocking="render"></script>
-  <script src="/static/i18n.js?v=13" defer></script>
-  <script src="/static/history.js?v=3" defer></script>
+  <script src="/static/i18n.js?v=14" defer></script>
+  <script src="/static/history.js?v=4" defer></script>
   <script src="/static/hero-scene.js?v=3" defer></script>
-  <script src="/static/product-review.js?v=1" defer></script>
-  <script src="/static/review-tools.js?v=6" defer></script>
+  <script src="/static/product-review.js?v=2" defer></script>
+  <script src="/static/review-tools.js?v=7" defer></script>
   <script src="/static/audit-extras.js?v=4" defer></script>
   <script src="/static/print-report.js?v=1" defer></script>
-  <script src="/static/app.js?v=17" defer></script>
-  <script type="module" src="/static/agent-scene/index.js?v=1"></script>
+  <script src="/static/app.js?v=18" defer></script>
+  <script type="module" src="/static/agent-scene/index.js?v=3"></script>
 </head>
 <body data-page="{{ page }}">
   <div id="auth-overlay" class="auth-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="auth-title">
@@ -36,6 +36,7 @@
   <div id="toast" class="toast hidden" role="status"></div>
   <div class="bg-glow" aria-hidden="true"></div>
 
+  <button type="button" id="scene-preview-close" class="btn-secondary hidden" data-msg="scenePreviewClose">Вернуться к проверке</button>
   <div id="workspace" class="container">
     <header class="nav" id="top">
       <a class="brand" href="/"><svg class="logo" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><path d="M16 2.5 4.5 7v8.2c0 7 4.6 12.2 11.5 14.3 6.9-2.1 11.5-7.3 11.5-14.3V7L16 2.5Z" stroke-width="2.2" stroke-linejoin="round"/><path d="m10.5 15.8 4 4 7-7.6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>REQUIRAGENTS</span></a>

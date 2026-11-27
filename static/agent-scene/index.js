@@ -155,7 +155,27 @@ class AgentScene {
     document.documentElement.dataset.agentScene = state;
   }
 
+  bindPreview() {
+    const open = document.getElementById("scene-preview");
+    const close = document.getElementById("scene-preview-close");
+    const workspace = document.getElementById("workspace");
+    if (!open || !close || !workspace) return;
+    open.classList.remove("hidden");
+    const setPreview = (visible) => {
+      document.body.classList.toggle("scene-preview-open", visible);
+      workspace.inert = visible;
+      close.classList.toggle("hidden", !visible);
+      (visible ? close : open).focus();
+    };
+    open.addEventListener("click", () => setPreview(true));
+    close.addEventListener("click", () => setPreview(false));
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && workspace.inert) setPreview(false);
+    });
+  }
+
   bind() {
+    this.bindPreview();
     window.addEventListener("agentscene", (event) => this.onEvent(event.detail || {}));
     window.addEventListener("resize", () => { this.resize(); this.renderIfStatic(); });
     document.addEventListener("visibilitychange", () => this.updateLoop());
@@ -212,8 +232,19 @@ class AgentScene {
       ? this.quick.actor
       : this.deepActors.find((item) => item.role === "idle" && item.root.visible) || this.deepActors[0];
     this.overlay.say(actor, text("sceneUpload"), 2.4, "pipeline");
+    if (this.mode === "deep" && this.animated) {
+      const output = this.office.printerOut;
+      this.doc.setWorld(output.clone().add(new THREE.Vector3(0, -.025, -.23)));
+      this.doc.show();
+      this.doc.fly((position) => position.copy(output), .8);
+    }
     clearTimeout(this.uploadTimer);
-    this.uploadTimer = setTimeout(() => { if (this.state === "upload-started") this.setState("idle"); }, 2400);
+    this.uploadTimer = setTimeout(() => {
+      if (this.state === "upload-started") {
+        this.doc.hide();
+        this.setState("idle");
+      }
+    }, 2400);
   }
 
   setMode(mode, instant = false) {

@@ -302,7 +302,7 @@ function renderFixDetail(row, edits) {
   card.append(title, element("p", "hint", row.issue));
   const controls = element("div", "actions fix-actions");
   const sourceIds = Object.fromEntries(state.audit.document.requirements.map((item) => [item.id, item.source_id]));
-  const targets = conflictTargets({ ...row, sourceIds }, state.audit.document.text);
+  const targets = conflictTargets({ ...row, sourceIds, requirementRanges: state.audit.document.requirements }, state.audit.document.text);
   if (targets.length) {
     renderConflictEditor(card, row, edits, targets);
     card.append(makeEvidence(row));

@@ -3,13 +3,18 @@
 const reviewNumbers = /(?<![\p{L}\w-])\d+(?:[ ,\u00a0]\d{3})*(?:[.,]\d+)?(?![\p{L}\w-])/gu;
 
 function conflictTargets(row, source) {
+  const legacy = row.criterion_id === "spec.contradiction";
   if (row.review_reason || row.verified !== "exact" ||
-      (row.action_kind !== "business_decision" && !["contradiction", "inconsistent_constraint", "scope_conflict"].includes(row.criterion_id))) return [];
+      (!legacy && row.action_kind !== "business_decision" && !["contradiction", "inconsistent_constraint", "scope_conflict"].includes(row.criterion_id))) return [];
   const chars = Array.from(source);
   const targets = (row.requirement_ids || []).map((id) => {
-    const candidates = row.evidence.filter((piece) => piece.requirement_id === id &&
+    const candidates = row.evidence.filter((piece) => {
+      const mapped = legacy && !piece.requirement_id ? (row.requirementRanges || []).filter((req) =>
+        req.start <= piece.start && piece.end <= req.end) : [];
+      return (piece.requirement_id === id || (mapped.length === 1 && mapped[0].id === id)) &&
       Number.isInteger(piece.start) && Number.isInteger(piece.end) && piece.start >= 0 &&
-      piece.end > piece.start && chars.slice(piece.start, piece.end).join("") === piece.text);
+      piece.end > piece.start && chars.slice(piece.start, piece.end).join("") === piece.text;
+    });
     if (!candidates.length) return null;
     const proof = candidates.sort((a, b) => b.text.length - a.text.length)[0];
     return { start: proof.start, end: proof.end, original: proof.text, requirementId: id,

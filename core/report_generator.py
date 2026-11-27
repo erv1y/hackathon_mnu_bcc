@@ -29,9 +29,9 @@ from agents.auditor import prepare_findings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-GREEN = colors.HexColor("#123B35")
-LIGHT_GREEN = colors.HexColor("#E8F3EF")
-GRAY = colors.HexColor("#64748B")
+GREEN = colors.HexColor("#164b37")
+LIGHT_GREEN = colors.HexColor("#edf5ee")
+GRAY = colors.HexColor("#50645a")
 LIGHT_GRAY = colors.HexColor("#F1F5F9")
 
 SEVERITY_COLORS = {
@@ -93,6 +93,22 @@ def register_fonts():
         normal="ReportArial",
         bold="ReportArialBold"
     )
+
+
+def draw_report_frame(canvas, page, language, *, font="ReportArial", footer=None):
+    width, height = A4
+    canvas.saveState()
+    canvas.setFillColor(GREEN)
+    canvas.rect(0, height - 6, width, 6, fill=1, stroke=0)
+    canvas.setFont(font, 9)
+    canvas.drawString(44, height - 30, "REQUIRAGENTS")
+    canvas.setStrokeColor(LIGHT_GRAY)
+    canvas.line(44, 37, width - 44, 37)
+    canvas.setFillColor(GRAY)
+    canvas.setFont(font, 8)
+    canvas.drawString(44, 25, footer or pdf_label("Автоматизированный аналитический отчёт", language))
+    canvas.drawRightString(width - 44, 25, f"{pdf_label('Страница', language)} {page}")
+    canvas.restoreState()
 
 
 def generate_pdf(result, output_path, *, executive=False):
@@ -192,6 +208,14 @@ def generate_pdf(result, output_path, *, executive=False):
             textColor=GRAY
         )
     }
+    styles["evidence"] = ParagraphStyle(
+        "ReportEvidence", parent=styles["body"], backColor=LIGHT_GREEN,
+        borderColor=colors.HexColor("#c8ded0"), borderWidth=.5,
+        borderPadding=7, leftIndent=8, rightIndent=8, spaceAfter=11,
+    )
+
+    def decorate_report_page(canvas, document):
+        draw_report_frame(canvas, document.page, language)
 
     story = []
     language = getattr(result, "passport", {}).get("language", "ru")
@@ -273,7 +297,7 @@ def generate_pdf(result, output_path, *, executive=False):
 
     # SECTION 1: EXECUTIVE DASHBOARD
 
-    add("AI REQUIREMENTS VALIDATOR", "small")
+    add("REQUIRAGENTS", "small")
 
     add(
         "Краткий отчёт для руководителя" if executive else "Отчёт о качестве технического задания",
@@ -382,21 +406,21 @@ def generate_pdf(result, output_path, *, executive=False):
         rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
         risks = sorted((d for d in retained if not needs_human_review(d)),
                        key=lambda d: (rank[d.final_severity], d.finding_id))
-        for d in risks[:5]:
+        selected = [d for d in risks if d.final_severity == "critical"]
+        selected.extend([d for d in risks if d.final_severity != "critical"][:max(0, 5 - len(selected))])
+        for d in selected:
             field(d.finding_id, f"{d.title} ({', '.join(d.requirement_ids)}). {d.explanation}")
         add("Приоритетные решения", "heading")
-        for action in result.audit.priority_actions[:5]:
+        for action in dict.fromkeys(result.audit.priority_actions[:3]):
             add(action)
         add("Ограничения анализа", "heading")
         add("Аудит охватывает извлечённые требования. Полнота и оценка ИИ требуют экспертной проверки.")
         for limitation in result.audit.limitations[:3]:
             add(limitation)
-        doc.build(story)
+        doc.build(story, onFirstPage=decorate_report_page, onLaterPages=decorate_report_page)
         return
 
     # SECTION 2: SUMMARY AND ACTIONS
-
-    story.append(PageBreak())
 
     add("3. Итоговый вывод", "heading")
 
@@ -442,8 +466,6 @@ def generate_pdf(result, output_path, *, executive=False):
 
     # SECTION 3: DETAILED FINDINGS
 
-    story.append(PageBreak())
-
     add("6. Детальный реестр замечаний", "heading")
 
     severity_order = {
@@ -465,10 +487,6 @@ def generate_pdf(result, output_path, *, executive=False):
         if group != current_group:
             add("Кандидаты для ручной проверки" if group else "Подтверждённые дефекты", "heading")
             current_group = group
-
-        original = original_findings[
-            decision.finding_id
-        ]
 
         add(
             f"{decision.finding_id} — {decision.title}",
@@ -496,69 +514,13 @@ def generate_pdf(result, output_path, *, executive=False):
             ", ".join(decision.requirement_ids)
         )
 
-        evidence = original.get("evidence")
-
-        if isinstance(evidence, str):
-
-            requirement = requirements.get(
-                original.get("requirement_id")
-            )
-
-            if requirement:
-
-                normalized_quote = " ".join(
-                    evidence.split()
-                )
-
-                normalized_text = " ".join(
-                    requirement.text.split()
-                )
-
-                if (
-                    normalized_quote
-                    and normalized_quote in normalized_text
-                ):
-                    field("Цитата", evidence)
-
-                else:
-                    add(
-                        "Цитата AI не прошла "
-                        "программную проверку.",
-                        "small"
-                    )
-
-        elif isinstance(evidence, list):
-
-            for item in evidence:
-                field(
-                    f"Цитата {item['requirement_id']}",
-                    item["quote"]
-                )
-
-        for requirement_id in decision.requirement_ids:
-
-            requirement = requirements.get(
-                requirement_id
-            )
-
-            if requirement:
-
-                location = requirement.source
-
-                if requirement.page is not None:
-                    location += (
-                        f", стр. {requirement.page}"
-                    )
-
-                if requirement.paragraph is not None:
-                    location += (
-                        f", абз. {requirement.paragraph}"
-                    )
-
-                field(
-                    f"Источник {requirement_id}",
-                    location
-                )
+        for proof in decision.final_evidence:
+            location = proof.source
+            if proof.page is not None:
+                location += f" · {label('Страница')} {proof.page}"
+            if proof.paragraph is not None:
+                location += f" · {label('Блок')} {proof.paragraph}"
+            story.append(paragraph(f"{proof.requirement_id} · {location}\n{proof.quote}", "evidence"))
 
         field("Проблема", decision.explanation)
         if decision.severity_rationale:
@@ -582,8 +544,6 @@ def generate_pdf(result, output_path, *, executive=False):
         story.append(Spacer(1, 12))
 
     # SECTION 4: REQUIREMENTS REGISTER
-
-    story.append(PageBreak())
 
     add("7. Реестр требований", "heading")
 
@@ -612,6 +572,12 @@ def generate_pdf(result, output_path, *, executive=False):
         ])
 
     table(rows, [75, 330, 105])
+
+    scenarios = getattr(result, "passport", {}).get("report_scenarios", [])
+    if scenarios:
+        add("Сценарии проверки", "heading")
+        for scenario in scenarios:
+            field(f"{scenario['id']} · {scenario['title']}", scenario["expected"])
 
     # SECTION 5: AUDIT TRAIL
 
@@ -654,56 +620,10 @@ def generate_pdf(result, output_path, *, executive=False):
         "ответственными специалистами."
     )
 
-    # HEADER AND FOOTER
-
-    def decorate_page(canvas, document):
-
-        canvas.saveState()
-
-        width, height = A4
-
-        canvas.setFillColor(GREEN)
-
-        canvas.rect(
-            0, height - 8,
-            width, 8,
-            fill=1,
-            stroke=0
-        )
-
-        canvas.setFont("ReportArial", 8)
-        canvas.setFillColor(GRAY)
-
-        canvas.drawString(
-            42,
-            height - 29,
-            "AI REQUIREMENTS VALIDATOR"
-        )
-
-        canvas.setStrokeColor(LIGHT_GRAY)
-
-        canvas.line(
-            42, 37,
-            width - 42, 37
-        )
-
-        canvas.drawString(
-            42, 24,
-            "Автоматизированный аналитический отчёт"
-        )
-
-        canvas.drawRightString(
-            width - 42,
-            24,
-            f"Страница {document.page}"
-        )
-
-        canvas.restoreState()
-
     doc.build(
         story,
-        onFirstPage=decorate_page,
-        onLaterPages=decorate_page
+        onFirstPage=decorate_report_page,
+        onLaterPages=decorate_report_page
     )
 
     print(f"[PDF] Report generated: {output_path}")

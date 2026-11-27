@@ -90,6 +90,7 @@ function renderDashboard(demo = null) {
   const runs = readRecentRuns();
   const latest = runs[0] || demo;
   const values = latest ? auditCounts(latest.report) : {};
+  $("overview-score-label").textContent = msg(latest?.report.native ? "qualityEstimate" : "criteriaScore");
   for (const id of ["score", "findings", "high", "requirements"]) {
     $(`overview-${id}`).textContent = values[id] ?? "—";
   }

@@ -117,7 +117,9 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
                    clarification=recommendation, verified="exact" if proofs else "unverified",
                    review_reason=reason, score_points=0, references=[], also_by=[],
                    audit_decision=decision.decision if decision else None,
-                   audit_reason=decision.audit_reason if decision else None)
+                   audit_reason=decision.audit_reason if decision else None,
+                   root_cause=decision.root_cause if decision else None,
+                   scope=decision.scope if decision else None)
         # Native recommendations are advisory. A direct replacement requires an exact,
         # uniquely located line, explicitly returned as a proposed rewrite, plus human approval.
         rewrite = (not partial and not candidate and len(proofs) == 1 and len(ids) == 1
@@ -212,6 +214,11 @@ def adapt_report(result, bundle, settings, language, timings=None, anchors=None)
     report["native"]["passport"]["product_counts"] = result.passport["product_counts"]
     report["insights"] = build_insights(bundle, findings, settings.profile, mode, language,
                                       requirements=report["document"]["requirements"] if not report["partial"] else ())
+    result.passport["report_scenarios"] = [
+        {key: row[key] for key in ("id", "title", "expected")}
+        for row in report["insights"]["scenarios"][:10]
+    ]
+    report["native"]["passport"]["report_scenarios"] = result.passport["report_scenarios"]
     report["coverage"].update(agents_completed=sum(module["ok"] for module in modules.values()), agents_total=len(modules),
                               criteria_in_completed_agents=0 if partial else len(CRITERIA), criteria_total=len(CRITERIA))
     report["check"].update(criteria=list(CRITERIA), completed_criteria=[] if partial else list(CRITERIA), minimum_severity="Low")
