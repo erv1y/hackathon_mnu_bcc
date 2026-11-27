@@ -30,7 +30,7 @@ body.scene-preview-open .agent-scene-canvas.ready { opacity: 1; }
 }
 .audit-workspace:has(.scene-panel:not(.hidden)) .audit-setup { grid-template-columns:minmax(0,1fr); }
 .scene-panel { min-width:0; background:var(--glass); border:1px solid var(--border); border-radius:var(--r); overflow:hidden; }
-.audit-flow[data-stage=report] + .scene-panel { display:none; }
+body:not(.scene-preview-open) .audit-flow[data-stage=report] + .scene-panel { display:none; }
 .scene-toolbar { display:flex; flex-wrap:wrap; gap:8px 14px; padding:12px 14px; justify-content:space-between; align-items:center; }
 .scene-toolbar h2 { font-size:1rem; }
 .scene-controls { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
