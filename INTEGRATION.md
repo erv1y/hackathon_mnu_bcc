@@ -152,8 +152,8 @@ python -m unittest tests.test_release_stabilization tests.test_auditor_recovery 
 Запустите локальный стенд в режиме сохранённого примера.
 
 ```bash
-git switch integration-v2
-git pull --ff-only origin integration-v2
+git switch main
+git pull --ff-only origin main
 AUDIT_DEMO_ONLY=1 ./.venv/Scripts/python.exe -m uvicorn web:app --host 127.0.0.1 --port 8000
 ```
 
