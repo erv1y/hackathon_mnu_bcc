@@ -430,7 +430,10 @@ def review_batch(audit_input, prompt, batch, reqs, stage, *, need_summary):
         payload = {**audit_input, "findings": scope, "overlap_hints": overlap_hints(scope)}
         if attempt > 1:
             payload.update(
-                task="Return decisions only for requested_finding_ids. Locked decisions are context only.",
+                task=("Return the required audit summary and decisions for requested_finding_ids. "
+                      "If no IDs are requested, return an empty decisions array. Locked decisions are context only."
+                      if want_summary else
+                      "Return decisions only for requested_finding_ids. Locked decisions are context only."),
                 requested_finding_ids=sorted(expected),
                 locked_decisions=[row.model_dump(mode="json") for row in retained.values()],
                 validation_errors=[issue.describe() for issue in dict.fromkeys(issues)][:100],

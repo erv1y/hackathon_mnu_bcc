@@ -73,6 +73,18 @@ class AuditorReliabilityTests(unittest.TestCase):
         for secret in ("private fabricated quotation", "secret unknown label", "must not appear"):
             self.assertNotIn(secret, logs)
 
+    def test_missing_summary_retry_does_not_reaudit_valid_decisions(self):
+        first = {"decisions": self.result.model_dump()["decisions"]}
+        repair = self.result.model_dump()
+        repair["decisions"] = []
+        with patch.object(auditor, "ask_gemini", side_effect=[json.dumps(first), json.dumps(repair)]) as model:
+            result = self.audit()
+        request = json.loads(model.call_args.kwargs["prompt"])
+        self.assertEqual(request["requested_finding_ids"], [])
+        self.assertEqual(len(request["locked_decisions"]), len(first["decisions"]))
+        self.assertIn("required audit summary", request["task"])
+        self.assertEqual(result.decisions, self.result.decisions)
+
     def test_duplicate_and_invalid_severity_try_stronger_model_on_third_attempt(self):
         initial = self.result.model_dump()
         initial["decisions"].append(initial["decisions"][1])
