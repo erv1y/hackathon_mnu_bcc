@@ -1,0 +1,759 @@
+{
+  "version": "graph-diagnostic-1.0.0",
+  "cases": [
+    {
+      "id": "archive-export",
+      "title": "Archive export",
+      "language": "en",
+      "text": "- The owner may download monthly archives in UTF-8 CSV for 90 days after closing.",
+      "companion": "",
+      "reference_requirements": [
+        "The owner may download monthly archives in UTF-8 CSV for 90 days after closing."
+      ],
+      "scope": "Only the behavior specified in this package is in scope.",
+      "split": "development",
+      "expected": []
+    },
+    {
+      "id": "rounding",
+      "title": "Rounding",
+      "language": "ru",
+      "text": "- Комиссия округляется до целой копейки по правилу половина вверх.",
+      "companion": "",
+      "reference_requirements": [
+        "Комиссия округляется до целой копейки по правилу половина вверх."
+      ],
+      "scope": "В области оценки только поведение, описанное в этом пакете.",
+      "split": "development",
+      "expected": []
+    },
+    {
+      "id": "receipt-owner",
+      "title": "Receipt owner",
+      "language": "kk",
+      "text": "- Түбіртекті тек төлем иесі жүктейді, ал басқа пайдаланушыға жүйе 403 кодын қайтарады.",
+      "companion": "",
+      "reference_requirements": [
+        "Түбіртекті тек төлем иесі жүктейді, ал басқа пайдаланушыға жүйе 403 кодын қайтарады."
+      ],
+      "scope": "Бағалау аясы осы құжаттарда сипатталған әрекеттермен шектеледі.",
+      "split": "development",
+      "expected": []
+    },
+    {
+      "id": "callback-latency",
+      "title": "Callback latency",
+      "language": "en",
+      "text": "- The service shall notify operators reasonably quickly after rejecting a callback.",
+      "companion": "",
+      "reference_requirements": [
+        "The service shall notify operators reasonably quickly after rejecting a callback."
+      ],
+      "scope": "Only the behavior specified in this package is in scope.",
+      "split": "development",
+      "expected": [
+        {
+          "criterion_id": "verifiability",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "The service shall notify operators reasonably quickly after rejecting a callback."
+          ],
+          "description": "The callback notification deadline has no measurable upper bound.",
+          "severity_rationale": "Operators cannot verify timely escalation.",
+          "acceptable_classifications": [
+            "verifiability",
+            "unambiguity"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cashout-vague",
+      "title": "Cashout vague",
+      "language": "ru",
+      "text": "- Подтверждение выдачи наличных должно отображаться достаточно быстро.",
+      "companion": "",
+      "reference_requirements": [
+        "Подтверждение выдачи наличных должно отображаться достаточно быстро."
+      ],
+      "scope": "В области оценки только поведение, описанное в этом пакете.",
+      "split": "development",
+      "expected": [
+        {
+          "criterion_id": "unambiguity",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "Подтверждение выдачи наличных должно отображаться достаточно быстро."
+          ],
+          "description": "Для отображения подтверждения выдачи не задан измеримый срок.",
+          "severity_rationale": "Проверка времени отображения невозможна.",
+          "acceptable_classifications": [
+            "unambiguity",
+            "verifiability"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "batch-vague",
+      "title": "Batch vague",
+      "language": "kk",
+      "text": "- Жүйе пакет қабылданбағаннан кейін операторға мүмкіндігінше тез хабарлайды.",
+      "companion": "",
+      "reference_requirements": [
+        "Жүйе пакет қабылданбағаннан кейін операторға мүмкіндігінше тез хабарлайды."
+      ],
+      "scope": "Бағалау аясы осы құжаттарда сипатталған әрекеттермен шектеледі.",
+      "split": "development",
+      "expected": [
+        {
+          "criterion_id": "verifiability",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "Жүйе пакет қабылданбағаннан кейін операторға мүмкіндігінше тез хабарлайды."
+          ],
+          "description": "Операторға хабарлау үшін өлшенетін мерзім белгіленбеген.",
+          "severity_rationale": "Хабарлау уақытын қабылдау сынағында тексеру мүмкін емес.",
+          "acceptable_classifications": [
+            "verifiability",
+            "unambiguity"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "debit-insufficient",
+      "title": "Debit insufficient",
+      "language": "en",
+      "text": "- The checkout debits the total price from the account on authorization.\n- Checkout must support accounts whose balance is below the purchase total.",
+      "companion": "",
+      "reference_requirements": [
+        "The checkout debits the total price from the account on authorization.",
+        "Checkout must support accounts whose balance is below the purchase total."
+      ],
+      "scope": "Only the behavior specified in this package is in scope.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "completeness",
+          "severity": "High",
+          "evidence": "exact",
+          "anchors": [
+            "The checkout debits the total price from the account on authorization.",
+            "Checkout must support accounts whose balance is below the purchase total."
+          ],
+          "description": "The checkout lacks an outcome for authorization with insufficient funds.",
+          "severity_rationale": "An undefined debit outcome affects account balances.",
+          "acceptable_classifications": [
+            "completeness",
+            "missing_requirement"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fee-overdraft",
+      "title": "Fee overdraft",
+      "language": "ru",
+      "text": "- При отсутствии овердрафта остаток не может стать отрицательным.\n- Комиссию за обслуживание списывать полностью даже при нулевом остатке.",
+      "companion": "",
+      "reference_requirements": [
+        "При отсутствии овердрафта остаток не может стать отрицательным.",
+        "Комиссию за обслуживание списывать полностью даже при нулевом остатке."
+      ],
+      "scope": "В области оценки только поведение, описанное в этом пакете.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "contradiction",
+          "severity": "High",
+          "evidence": "exact",
+          "anchors": [
+            "При отсутствии овердрафта остаток не может стать отрицательным.",
+            "Комиссию за обслуживание списывать полностью даже при нулевом остатке."
+          ],
+          "description": "Полное списание комиссии при нуле нарушает запрет отрицательного остатка.",
+          "severity_rationale": "Одновременное исполнение меняет денежный остаток вопреки правилу.",
+          "acceptable_classifications": [
+            "contradiction",
+            "inconsistent_constraint"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "daily-limit",
+      "title": "Daily limit",
+      "language": "kk",
+      "text": "- Бір клиенттің тәуліктік аударым шегі 100 000 теңге.\n- Сол клиентке сол тәулікте 150 000 теңгеге дейін аударуға рұқсат беріледі.",
+      "companion": "",
+      "reference_requirements": [
+        "Бір клиенттің тәуліктік аударым шегі 100 000 теңге.",
+        "Сол клиентке сол тәулікте 150 000 теңгеге дейін аударуға рұқсат беріледі."
+      ],
+      "scope": "Бағалау аясы осы құжаттарда сипатталған әрекеттермен шектеледі.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "contradiction",
+          "severity": "High",
+          "evidence": "exact",
+          "anchors": [
+            "Бір клиенттің тәуліктік аударым шегі 100 000 теңге.",
+            "Сол клиентке сол тәулікте 150 000 теңгеге дейін аударуға рұқсат беріледі."
+          ],
+          "description": "Бір клиентке бір тәулікке екі үйлеспейтін аударым шегі берілген.",
+          "severity_rationale": "Шек төлемдерді мақұлдау шешіміне тікелей әсер етеді.",
+          "acceptable_classifications": [
+            "contradiction",
+            "inconsistent_constraint"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "receipt-double",
+      "title": "Receipt double",
+      "language": "en",
+      "text": "- The customer shall receive exactly one email receipt per settled purchase.\n- After settlement of a purchase, send the customer one email receipt and no additional email receipt.",
+      "companion": "",
+      "reference_requirements": [
+        "The customer shall receive exactly one email receipt per settled purchase.",
+        "After settlement of a purchase, send the customer one email receipt and no additional email receipt."
+      ],
+      "scope": "Only the behavior specified in this package is in scope.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "duplicate",
+          "severity": "Low",
+          "evidence": "exact",
+          "anchors": [
+            "The customer shall receive exactly one email receipt per settled purchase.",
+            "After settlement of a purchase, send the customer one email receipt and no additional email receipt."
+          ],
+          "description": "The same normative email receipt obligation is stated twice.",
+          "severity_rationale": "Redundant text increases maintenance effort.",
+          "acceptable_classifications": [
+            "duplicate"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "retry-debit",
+      "title": "Retry debit",
+      "language": "ru",
+      "text": "- При повторе запроса с тем же ключом возвращается первоначальный результат.\n- Повтор запроса с тем же ключом создаёт новое списание для уже завершённой операции.",
+      "companion": "",
+      "reference_requirements": [
+        "При повторе запроса с тем же ключом возвращается первоначальный результат.",
+        "Повтор запроса с тем же ключом создаёт новое списание для уже завершённой операции."
+      ],
+      "scope": "В области оценки только поведение, описанное в этом пакете.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "contradiction",
+          "severity": "High",
+          "evidence": "exact",
+          "anchors": [
+            "При повторе запроса с тем же ключом возвращается первоначальный результат.",
+            "Повтор запроса с тем же ключом создаёт новое списание для уже завершённой операции."
+          ],
+          "description": "Для повтора завершённой операции заданы несовместимые правила проведения списания.",
+          "severity_rationale": "Повтор может привести к повторному списанию.",
+          "acceptable_classifications": [
+            "contradiction",
+            "inconsistent_constraint"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "retry-clean",
+      "title": "Retry clean",
+      "language": "kk",
+      "text": "- Бір кілтпен жіберілген қайталау бастапқы нәтиже мен операция күнін қайтарады және жаңа жазба құрмайды.",
+      "companion": "",
+      "reference_requirements": [
+        "Бір кілтпен жіберілген қайталау бастапқы нәтиже мен операция күнін қайтарады және жаңа жазба құрмайды."
+      ],
+      "scope": "Бағалау аясы осы құжаттарда сипатталған әрекеттермен шектеледі.",
+      "split": "held-out",
+      "expected": []
+    },
+    {
+      "id": "support-role",
+      "title": "Support role",
+      "language": "en",
+      "text": "- Any customer may directly approve a payout from another customer's account.",
+      "companion": "",
+      "reference_requirements": [
+        "Any customer may directly approve a payout from another customer's account."
+      ],
+      "scope": "Only the behavior specified in this package is in scope.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "correctness",
+          "severity": "Critical",
+          "evidence": "exact",
+          "anchors": [
+            "Any customer may directly approve a payout from another customer's account."
+          ],
+          "description": "Customers are allowed to approve payouts from accounts they do not control.",
+          "severity_rationale": "The rule permits unauthorized movement of funds.",
+          "acceptable_classifications": [
+            "correctness"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reset-role",
+      "title": "Reset role",
+      "language": "ru",
+      "text": "- Восстановление доступа к чужому счёту разрешено любому вошедшему клиенту.",
+      "companion": "",
+      "reference_requirements": [
+        "Восстановление доступа к чужому счёту разрешено любому вошедшему клиенту."
+      ],
+      "scope": "В области оценки только поведение, описанное в этом пакете.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "correctness",
+          "severity": "Critical",
+          "evidence": "exact",
+          "anchors": [
+            "Восстановление доступа к чужому счёту разрешено любому вошедшему клиенту."
+          ],
+          "description": "Правило позволяет клиенту восстанавливать доступ к чужому счёту.",
+          "severity_rationale": "Несанкционированное восстановление угрожает контролю над счётом.",
+          "acceptable_classifications": [
+            "correctness"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "privacy-owner",
+      "title": "Privacy owner",
+      "language": "kk",
+      "text": "- Шот иесі ғана жеке үзіндіні көреді, ал оператор тек операция идентификаторын көреді.",
+      "companion": "",
+      "reference_requirements": [
+        "Шот иесі ғана жеке үзіндіні көреді, ал оператор тек операция идентификаторын көреді."
+      ],
+      "scope": "Бағалау аясы осы құжаттарда сипатталған әрекеттермен шектеледі.",
+      "split": "held-out",
+      "expected": []
+    },
+    {
+      "id": "availability-scope",
+      "title": "Availability scope",
+      "language": "en",
+      "text": "- The payout status endpoint shall be available continuously, including while rolling updates run.",
+      "companion": "",
+      "reference_requirements": [
+        "The payout status endpoint shall be available continuously, including while rolling updates run."
+      ],
+      "scope": "Only the behavior specified in this package is in scope.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "verifiability",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "The payout status endpoint shall be available continuously, including while rolling updates run."
+          ],
+          "description": "The availability obligation does not specify a measurement window or method.",
+          "severity_rationale": "The team cannot consistently verify continuous availability.",
+          "acceptable_classifications": [
+            "verifiability",
+            "completeness"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "availability-clean",
+      "title": "Availability clean",
+      "language": "ru",
+      "text": "- API доступен 99,95% календарного месяца по минутным проверкам из двух регионов.\n- Согласованные окна обслуживания исключаются из расчёта доступности.",
+      "companion": "",
+      "reference_requirements": [
+        "API доступен 99,95% календарного месяца по минутным проверкам из двух регионов.",
+        "Согласованные окна обслуживания исключаются из расчёта доступности."
+      ],
+      "scope": "В области оценки только поведение, описанное в этом пакете.",
+      "split": "held-out",
+      "expected": []
+    },
+    {
+      "id": "recovery-gap",
+      "title": "Recovery gap",
+      "language": "kk",
+      "text": "- Қызмет апаттан кейін деректерді резервтік көшірмеден қалпына келтіреді.",
+      "companion": "",
+      "reference_requirements": [
+        "Қызмет апаттан кейін деректерді резервтік көшірмеден қалпына келтіреді."
+      ],
+      "scope": "Бағалау аясы осы құжаттарда сипатталған әрекеттермен шектеледі.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "completeness",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "Қызмет апаттан кейін деректерді резервтік көшірмеден қалпына келтіреді."
+          ],
+          "description": "Апаттан кейін қалпына келтіру уақыты мен рұқсат етілетін дерек жоғалту шегі берілмеген.",
+          "severity_rationale": "Қалпына келтіру нәтижесін өлшеу шарттары анықталмаған.",
+          "acceptable_classifications": [
+            "completeness",
+            "missing_requirement"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cutoff-appendix",
+      "title": "Cutoff appendix",
+      "language": "en",
+      "text": "- Same-day refund requests received at 14:00 UTC settle that day.",
+      "companion": "- Same-day refund requests received at 14:00 UTC settle the following business day.",
+      "reference_requirements": [
+        "Same-day refund requests received at 14:00 UTC settle that day.",
+        "Same-day refund requests received at 14:00 UTC settle the following business day."
+      ],
+      "scope": "Only the behavior specified in this package is in scope.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "contradiction",
+          "severity": "High",
+          "evidence": "exact",
+          "anchors": [
+            "Same-day refund requests received at 14:00 UTC settle that day.",
+            "Same-day refund requests received at 14:00 UTC settle the following business day."
+          ],
+          "description": "The main document and appendix require different settlement days for the same refund.",
+          "severity_rationale": "Refund timing promised to customers depends on which rule is used.",
+          "acceptable_classifications": [
+            "contradiction",
+            "inconsistent_constraint"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "acceptance-limit",
+      "title": "Acceptance limit",
+      "language": "ru",
+      "text": "- Списание на сумму ровно 10 000 рублей разрешено.\n- Критерий приёмки требует отказа при списании ровно 10 000 рублей.",
+      "companion": "",
+      "reference_requirements": [
+        "Списание на сумму ровно 10 000 рублей разрешено.",
+        "Критерий приёмки требует отказа при списании ровно 10 000 рублей."
+      ],
+      "scope": "В области оценки только поведение, описанное в этом пакете.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "contradiction",
+          "severity": "High",
+          "evidence": "exact",
+          "anchors": [
+            "Списание на сумму ровно 10 000 рублей разрешено.",
+            "Критерий приёмки требует отказа при списании ровно 10 000 рублей."
+          ],
+          "description": "Критерий приёмки и правило дают разные результаты на границе лимита.",
+          "severity_rationale": "Нельзя реализовать и принять одно и то же граничное поведение.",
+          "acceptable_classifications": [
+            "contradiction",
+            "inconsistent_constraint"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "acceptance-clean",
+      "title": "Acceptance clean",
+      "language": "kk",
+      "text": "- 500 теңгеден аз аударымға рұқсат берілмейді.\n- Қабылдау сынағында 499 теңге қабылданбайды, ал 500 теңге жеткілікті қалдық болса қабылданады.",
+      "companion": "",
+      "reference_requirements": [
+        "500 теңгеден аз аударымға рұқсат берілмейді.",
+        "Қабылдау сынағында 499 теңге қабылданбайды, ал 500 теңге жеткілікті қалдық болса қабылданады."
+      ],
+      "scope": "Бағалау аясы осы құжаттарда сипатталған әрекеттермен шектеледі.",
+      "split": "held-out",
+      "expected": []
+    },
+    {
+      "id": "missing-policy",
+      "title": "Missing policy",
+      "language": "en",
+      "text": "- The adjustment service applies the refund eligibility rules from appendix R-17.",
+      "companion": "",
+      "reference_requirements": [
+        "The adjustment service applies the refund eligibility rules from appendix R-17."
+      ],
+      "scope": "Only the behavior specified in this package is in scope.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "missing_dependency",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "The adjustment service applies the refund eligibility rules from appendix R-17."
+          ],
+          "description": "The referenced refund eligibility appendix R-17 is absent from the package.",
+          "severity_rationale": "Refund eligibility cannot be derived from the supplied documents.",
+          "acceptable_classifications": [
+            "missing_dependency",
+            "traceability"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "status-notification",
+      "title": "Status notification",
+      "language": "ru",
+      "text": "- После успешного зачисления отправляется push-уведомление.\n- При недоставке push тот же успешный перевод повторно зачисляется.",
+      "companion": "",
+      "reference_requirements": [
+        "После успешного зачисления отправляется push-уведомление.",
+        "При недоставке push тот же успешный перевод повторно зачисляется."
+      ],
+      "scope": "В области оценки только поведение, описанное в этом пакете.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "correctness",
+          "severity": "High",
+          "evidence": "exact",
+          "anchors": [
+            "После успешного зачисления отправляется push-уведомление.",
+            "При недоставке push тот же успешный перевод повторно зачисляется."
+          ],
+          "description": "Сбой доставки уведомления запускает повторное зачисление успешного перевода.",
+          "severity_rationale": "Правило способно завысить остаток получателя.",
+          "acceptable_classifications": [
+            "correctness"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fee-unit",
+      "title": "Fee unit",
+      "language": "kk",
+      "text": "- Сатып алу комиссиясы әр операциядан он мөлшерінде алынады.",
+      "companion": "",
+      "reference_requirements": [
+        "Сатып алу комиссиясы әр операциядан он мөлшерінде алынады."
+      ],
+      "scope": "Бағалау аясы осы құжаттарда сипатталған әрекеттермен шектеледі.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "unambiguity",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "Сатып алу комиссиясы әр операциядан он мөлшерінде алынады."
+          ],
+          "description": "Комиссияның он деп берілген мәнінде валюта не пайыз бірлігі көрсетілмеген.",
+          "severity_rationale": "Комиссия сомасын бірмәнді есептеу мүмкін емес.",
+          "acceptable_classifications": [
+            "unambiguity",
+            "verifiability"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mixed-search",
+      "title": "Mixed search",
+      "language": "en",
+      "text": "- Only account owners may search their own settled purchases.\n- Search results shall return shortly after the owner submits a query.",
+      "companion": "",
+      "reference_requirements": [
+        "Only account owners may search their own settled purchases.",
+        "Search results shall return shortly after the owner submits a query."
+      ],
+      "scope": "Only the behavior specified in this package is in scope.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "verifiability",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "Search results shall return shortly after the owner submits a query."
+          ],
+          "description": "The search latency target uses shortly without a measurable duration.",
+          "severity_rationale": "Latency cannot be evaluated in acceptance testing.",
+          "acceptable_classifications": [
+            "verifiability",
+            "unambiguity"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "two-financial-defects",
+      "title": "Two financial defects",
+      "language": "ru",
+      "text": "- Один и тот же повтор подтверждённого перевода повторно списывает сумму.\n- Комиссия равна пяти без указания единицы или валюты.",
+      "companion": "",
+      "reference_requirements": [
+        "Один и тот же повтор подтверждённого перевода повторно списывает сумму.",
+        "Комиссия равна пяти без указания единицы или валюты."
+      ],
+      "scope": "В области оценки только поведение, описанное в этом пакете.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "correctness",
+          "severity": "High",
+          "evidence": "exact",
+          "anchors": [
+            "Один и тот же повтор подтверждённого перевода повторно списывает сумму."
+          ],
+          "description": "Повтор подтверждённого перевода создаёт повторное списание.",
+          "severity_rationale": "Необоснованно уменьшается остаток.",
+          "acceptable_classifications": [
+            "correctness"
+          ]
+        },
+        {
+          "criterion_id": "unambiguity",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "Комиссия равна пяти без указания единицы или валюты."
+          ],
+          "description": "Для комиссии в размере пяти не задана единица.",
+          "severity_rationale": "Комиссию невозможно однозначно рассчитать.",
+          "acceptable_classifications": [
+            "unambiguity",
+            "verifiability"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "status-conflict",
+      "title": "Status conflict",
+      "language": "kk",
+      "text": "- Расталған қайтарымның мәртебесі клиентке аяқталды деп көрсетіледі.\n- Сол расталған қайтарым клиентке қабылданбады деп көрсетіледі.",
+      "companion": "",
+      "reference_requirements": [
+        "Расталған қайтарымның мәртебесі клиентке аяқталды деп көрсетіледі.",
+        "Сол расталған қайтарым клиентке қабылданбады деп көрсетіледі."
+      ],
+      "scope": "Бағалау аясы осы құжаттарда сипатталған әрекеттермен шектеледі.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "contradiction",
+          "severity": "High",
+          "evidence": "exact",
+          "anchors": [
+            "Расталған қайтарымның мәртебесі клиентке аяқталды деп көрсетіледі.",
+            "Сол расталған қайтарым клиентке қабылданбады деп көрсетіледі."
+          ],
+          "description": "Расталған қайтарым үшін клиентке екі үйлеспейтін мәртебе көрсетіледі.",
+          "severity_rationale": "Клиент қайтарым нәтижесін сенімді анықтай алмайды.",
+          "acceptable_classifications": [
+            "contradiction",
+            "inconsistent_constraint"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fee-complete",
+      "title": "Fee complete",
+      "language": "en",
+      "text": "- For domestic transfers, charge 20 minor units only after a successful debit and charge zero on refusal.",
+      "companion": "",
+      "reference_requirements": [
+        "For domestic transfers, charge 20 minor units only after a successful debit and charge zero on refusal."
+      ],
+      "scope": "Only the behavior specified in this package is in scope.",
+      "split": "held-out",
+      "expected": []
+    },
+    {
+      "id": "archive-repeat",
+      "title": "Archive repeat",
+      "language": "ru",
+      "text": "- Продавец получает ровно один реестр возвратов за календарную неделю.",
+      "companion": "- В приложении задано такое же обязательство: продавец получает ровно один реестр возвратов за календарную неделю.",
+      "reference_requirements": [
+        "Продавец получает ровно один реестр возвратов за календарную неделю.",
+        "В приложении задано такое же обязательство: продавец получает ровно один реестр возвратов за календарную неделю."
+      ],
+      "scope": "В области оценки только поведение, описанное в этом пакете.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "duplicate",
+          "severity": "Low",
+          "evidence": "exact",
+          "anchors": [
+            "Продавец получает ровно один реестр возвратов за календарную неделю.",
+            "В приложении задано такое же обязательство: продавец получает ровно один реестр возвратов за календарную неделю."
+          ],
+          "description": "Обязательство о выдаче одного еженедельного реестра возвратов повторено в приложении.",
+          "severity_rationale": "Дублирование усложняет обновление правил.",
+          "acceptable_classifications": [
+            "duplicate"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "timeout-no-outcome",
+      "title": "Timeout no outcome",
+      "language": "kk",
+      "text": "- Төлем аяқталғанда жүйе құжат береді және сұраудың күту уақытының шегі 30 секунд болады.\n- Сұрау уақыты аяқталса, төлем күйін клиентке көрсету қажет.",
+      "companion": "",
+      "reference_requirements": [
+        "Төлем аяқталғанда жүйе құжат береді және сұраудың күту уақытының шегі 30 секунд болады.",
+        "Сұрау уақыты аяқталса, төлем күйін клиентке көрсету қажет."
+      ],
+      "scope": "Бағалау аясы осы құжаттарда сипатталған әрекеттермен шектеледі.",
+      "split": "held-out",
+      "expected": [
+        {
+          "criterion_id": "completeness",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "Төлем аяқталғанда жүйе құжат береді және сұраудың күту уақытының шегі 30 секунд болады.",
+            "Сұрау уақыты аяқталса, төлем күйін клиентке көрсету қажет."
+          ],
+          "description": "Күту уақыты аяқталған сәтте төлем аяқталмаған болса, көрсетілетін мәртебе анықталмаған.",
+          "severity_rationale": "Клиентке белгісіз нәтижені көрсету шарты тексерілмейді.",
+          "acceptable_classifications": [
+            "completeness",
+            "missing_requirement"
+          ]
+        }
+      ]
+    }
+  ]
+}
