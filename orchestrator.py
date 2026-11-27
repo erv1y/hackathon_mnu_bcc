@@ -21,7 +21,7 @@ from core.models import (ValidationResult, ExtractionResult, QualityAnalysisResu
                          ConsistencyAnalysisResult, AuditResult)
 from core.advanced_report import generate_pdf
 from core.run_metadata import tracked, now, revision, id_mapping
-from core.llm_client import MODEL_NAME, FALLBACK_MODELS
+from core.llm_client import MODEL_NAME, FALLBACK_MODELS, request_context, request_metrics, request_retry
 from agents.quick_validator import quick_validate, QuickValidationResult
 from agents.extractor import extract_requirements
 from agents.quality_analyst import analyze_quality
@@ -100,7 +100,7 @@ def normalize_paths(file_path):
     return sorted(paths, key=lambda p: p.name.casefold())
 
 
-def document_key(file_path, mode="deep"):
+def document_key(file_path, mode="deep", context=""):
     paths = normalize_paths(file_path)
     digest = hashlib.sha256()
     def add(value):
@@ -108,6 +108,7 @@ def document_key(file_path, mode="deep"):
         digest.update(value)
     add(CACHE_VERSION.encode())
     add(mode.encode())
+    add(context.encode())
     for path in paths:
         add(path.name.encode('utf-8'))
         add(path.read_bytes())
@@ -170,7 +171,7 @@ def extractor_node(state):
         combined = []
         for index, source in enumerate(state['source_files'], 1):
             sections = [s for s in state['sections'] if s['source'] == source]
-            print(f'[DOCUMENT {index}] {source}')
+            print(f'[DOCUMENT {index}]')
             local, calls = tracked(timed_analysis, f'Extractor D{index:02d}', extract_requirements, sections)
             models.extend(dict(call, source=source) for call in calls)
             validate_extraction(sections, local)
@@ -223,12 +224,38 @@ def choose_mode(state):
     return 'quick' if state['mode'] == 'quick' else 'extractor'
 
 
-def build_graph(checkpointer=None):
+def build_graph(checkpointer=None, node_callback=None, context="", metrics=None):
+    def observed(name, fn):
+        if node_callback is None and not context and metrics is None:
+            return fn
+
+        def execute(state):
+            token = request_context.set(context)
+            metric_token = request_metrics.set(metrics)
+            retry_token = request_retry.set((lambda: node_callback(name, "retrying")) if node_callback else None)
+            try:
+                if node_callback:
+                    node_callback(name, "started")
+                result = fn(state)
+                if node_callback:
+                    node_callback(name, "completed")
+                return result
+            except Exception:
+                if node_callback:
+                    node_callback(name, "failed")
+                raise
+            finally:
+                request_retry.reset(retry_token)
+                request_metrics.reset(metric_token)
+                request_context.reset(token)
+
+        return execute
+
     builder = StateGraph(ValidationState)
     for name, fn in [('extractor', extractor_node), ('quality', quality_node),
                      ('consistency', consistency_node), ('auditor', auditor_node)]:
-        builder.add_node(name, fn)
-    builder.add_node('quick', quick_node)
+        builder.add_node(name, observed(name, fn))
+    builder.add_node('quick', observed('quick', quick_node))
     builder.add_conditional_edges(START, choose_mode, {'quick': 'quick', 'extractor': 'extractor'})
     builder.add_edge('quick', END)
     builder.add_edge('extractor', 'quality')
@@ -262,28 +289,31 @@ def export_result(result, folder):
 
 
 def run_validation(file_path, progress_callback=None, reports_dir=None,
-                   use_cache=False, force_reanalysis=False, mode="deep"):
+                   use_cache=False, force_reanalysis=False, mode="deep", *,
+                   node_callback=None, sections=None, context="", write_reports=True):
     if mode not in ("quick", "deep"):
         raise ValueError("Invalid validation mode")
     started = time.perf_counter()
     paths = normalize_paths(file_path)
     folder = Path(reports_dir) if reports_dir is not None else REPORTS_DIR
     emit_progress(progress_callback, 5, 'Document Reader', 'Чтение документа...')
-    sections = [section for path in paths for section in read_document(path)]
+    if sections is None:
+        sections = [section for path in paths for section in read_document(path)]
     initial = {'mode': mode, 'source_files': [path.name for path in paths], 'sections': sections, 'original_started': now(), 'original_revision': revision()}
     print(f'[DOCUMENTS] {len(paths)}')
     print('[ENGINE] LangGraph StateGraph')
     # Without consent, checkpoint state exists only in RAM.
     if use_cache:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        key = document_key(paths, mode)
+        key = document_key(paths, mode, context)
         database = str(CACHE_DIR / f'{key}.sqlite')
     else:
         database = ':memory:'
         key = uuid4().hex
     config = {'configurable': {'thread_id': key}}
     with SqliteSaver.from_conn_string(database) as saver:
-        graph = build_graph(saver)
+        metrics = []
+        graph = build_graph(saver, node_callback, context, metrics)
         if force_reanalysis and use_cache:
             # Delete only the current document/configuration thread.
             saver.delete_thread(key)
@@ -334,6 +364,11 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
             if snapshot.next:
                 raise RuntimeError('Graph did not finish; retry to resume.')
         passport = {'mode': mode, 'run_kind': run_kind, 'analysis_started_utc': state.get('original_started'), 'report_run_utc': now(), 'analysis_revision': state.get('original_revision'), 'current_revision': revision(), 'configured_model': MODEL_NAME, 'successful_responses': {k: state.get(k+'_models', []) for k in (['quick'] if mode == 'quick' else ['extraction','quality','consistency','audit'])}}
+        passport["api_attempts"] = len(metrics)
+        passport["reported_tokens"] = {
+            field: sum(values) if (values := [call[field] for call in metrics if call.get(field) is not None]) else None
+            for field in ("input_tokens", "output_tokens", "total_tokens")
+        }
         if mode == 'quick':
             result = QuickRunResult(passport=passport, source_files=state['source_files'],
                 execution_time_seconds=round(time.perf_counter()-started, 2),
@@ -347,9 +382,9 @@ def run_validation(file_path, progress_callback=None, reports_dir=None,
             passport['release_review'] = {k:v for k,v in state.get('release_review_debug', {}).items() if k != 'pre_review_audit'}
             result = result_from_state(state, time.perf_counter() - started, passport)
     result.passport['id_mapping'] = id_mapping(result.extraction.requirements, sections)
-    if mode == 'quick':
+    if write_reports and mode == 'quick':
         save_json(result, 'quick_validation.json', folder)
-    else:
+    elif write_reports:
         export_result(result, folder)
         (folder / 'release_review.json').write_text(json.dumps(state.get('release_review_debug', {}), ensure_ascii=False, indent=2), encoding='utf-8')
         (folder / "audit_trace_v08.json").write_text(json.dumps(audit_trace(result.audit, prepare_findings(result.quality, result.consistency)), ensure_ascii=False, indent=2), encoding="utf-8")

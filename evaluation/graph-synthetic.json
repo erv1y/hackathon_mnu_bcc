@@ -1,0 +1,160 @@
+{
+  "cases": [
+    {
+      "id": "clean",
+      "title": "Statement export",
+      "language": "en",
+      "text": "# Statement export\n\n## Rules\n- For a completed month, only the account owner can download a CSV statement for that account.\n- The CSV includes the transaction ID, booking date, ISO currency code, and amount in minor units.",
+      "expected": [],
+      "reference_requirements": [
+        "For a completed month, only the account owner can download a CSV statement for that account.",
+        "The CSV includes the transaction ID, booking date, ISO currency code, and amount in minor units."
+      ],
+      "companion": ""
+    },
+    {
+      "id": "ambiguous",
+      "title": "Partner acknowledgments",
+      "language": "en",
+      "text": "# Partner acknowledgments\n\n## Rules\n- When the partner rejects a batch, the service notifies operations promptly.",
+      "expected": [
+        {
+          "criterion_id": "unambiguity",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "When the partner rejects a batch, the service notifies operations promptly."
+          ]
+        }
+      ],
+      "reference_requirements": [
+        "When the partner rejects a batch, the service notifies operations promptly."
+      ],
+      "companion": ""
+    },
+    {
+      "id": "missing",
+      "title": "Account closure",
+      "language": "en",
+      "text": "# Account closure\n\n## Rules\n- The service closes the customer account after a successful identity check.",
+      "expected": [
+        {
+          "criterion_id": "completeness",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "The service closes the customer account after a successful identity check."
+          ]
+        }
+      ],
+      "reference_requirements": [
+        "The service closes the customer account after a successful identity check."
+      ],
+      "companion": ""
+    },
+    {
+      "id": "traceability",
+      "title": "Charge dispute",
+      "language": "en",
+      "text": "# Charge dispute\n\n## Rules\n- Process charge disputes using the eligibility conditions in policy DIS-299.",
+      "expected": [
+        {
+          "criterion_id": "missing_dependency",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "Process charge disputes using the eligibility conditions in policy DIS-299."
+          ]
+        }
+      ],
+      "reference_requirements": [
+        "Process charge disputes using the eligibility conditions in policy DIS-299."
+      ],
+      "companion": ""
+    },
+    {
+      "id": "testability",
+      "title": "Receipt availability",
+      "language": "en",
+      "text": "# Receipt availability\n\n## Rules\n- Under normal conditions, receipt lookup must feel fast to the customer.",
+      "expected": [
+        {
+          "criterion_id": "verifiability",
+          "severity": "Medium",
+          "evidence": "exact",
+          "anchors": [
+            "Under normal conditions, receipt lookup must feel fast to the customer."
+          ]
+        }
+      ],
+      "reference_requirements": [
+        "Under normal conditions, receipt lookup must feel fast to the customer."
+      ],
+      "companion": ""
+    },
+    {
+      "id": "security",
+      "title": "Payout credentials",
+      "language": "en",
+      "text": "# Payout credentials\n\n## Rules\n- An unauthenticated caller may request the full recovery token for any payout account.",
+      "expected": [
+        {
+          "criterion_id": "correctness",
+          "severity": "Critical",
+          "evidence": "exact",
+          "anchors": [
+            "An unauthenticated caller may request the full recovery token for any payout account."
+          ]
+        }
+      ],
+      "reference_requirements": [
+        "An unauthenticated caller may request the full recovery token for any payout account."
+      ],
+      "companion": ""
+    },
+    {
+      "id": "transaction",
+      "title": "Ledger retries",
+      "language": "en",
+      "text": "# Ledger retries\n\n## Rules\n- A retry of a settled transfer must append another debit for the same operation ID.\n- Each operation ID may produce at most one debit entry.",
+      "expected": [
+        {
+          "criterion_id": "contradiction",
+          "severity": "High",
+          "evidence": "exact",
+          "anchors": [
+            "A retry of a settled transfer must append another debit for the same operation ID.",
+            "Each operation ID may produce at most one debit entry."
+          ]
+        }
+      ],
+      "reference_requirements": [
+        "A retry of a settled transfer must append another debit for the same operation ID.",
+        "Each operation ID may produce at most one debit entry."
+      ],
+      "companion": ""
+    },
+    {
+      "id": "cross-file",
+      "title": "Settlement cutoff",
+      "language": "en",
+      "text": "# Settlement cutoff\n\n## Rules\n- A same-day transfer submitted before 16:00 UTC is included in today's settlement batch.",
+      "expected": [
+        {
+          "criterion_id": "contradiction",
+          "severity": "High",
+          "evidence": "exact",
+          "anchors": [
+            "A same-day transfer submitted before 16:00 UTC is included in today's settlement batch.",
+            "A same-day transfer submitted at 15:30 UTC is excluded from today's settlement batch."
+          ]
+        }
+      ],
+      "reference_requirements": [
+        "A same-day transfer submitted before 16:00 UTC is included in today's settlement batch.",
+        "A same-day transfer submitted at 15:30 UTC is excluded from today's settlement batch."
+      ],
+      "companion": "# Companion policy\n\n- A same-day transfer submitted at 15:30 UTC is excluded from today's settlement batch."
+    }
+  ]
+}

@@ -49,7 +49,7 @@ def materialize(spans, sections):
         original = span.original_id.strip()
         # Only preserve a supplied ID if it is visibly present in the selected source.
         if original and not re.search(r'(?<![\w-])' + re.escape(original) + r'(?![\w-])', quote):
-            print(f'[ID REVIEW] Unverified ID {original!r}; assigning system ID')
+            print(f'[ID REVIEW] Unverified original ID; assigning system ID')
             original = ''
         result.append((key, Requirement(id=original or 'AUTO', type=span.type, text=quote,
                          source=s['source'], page=s.get('page'), paragraph=s.get('paragraph'))))
@@ -77,7 +77,7 @@ def extract_batch(sections, instruction):
             return [r for _, r in items]
         except ValueError as exc:
             error = str(exc)
-            print(f'[SPAN RETRY] {attempt}/2: {error}')
+            print(f'[SPAN RETRY] {attempt}/2: {type(error).__name__}')
     raise ValueError(f'Source span validation failed: {error}')
 
 
@@ -89,7 +89,7 @@ def normalize_ids(items):
     for r in items:
         if r.id == 'AUTO' or r.id in seen:
             if r.id != 'AUTO':
-                print(f'[ID REVIEW] Repeated original ID {r.id}; retaining text with new system ID')
+                print(f'[ID REVIEW] Repeated original ID; retaining text with new system ID')
             while f'AUTO-{n:03d}' in used:
                 n += 1
             r = r.model_copy(update={'id': f'AUTO-{n:03d}'})
@@ -124,7 +124,7 @@ def extract_requirements(sections):
     covered = {(r.source,r.page,r.paragraph) for r in result.requirements}
     for s in sections:
         if (s['source'],s.get('page'),s.get('paragraph')) not in covered:
-            print(f"[COVERAGE REVIEW] {s.get('section','')} | page={s.get('page')} paragraph={s.get('paragraph')}")
+            print(f"[COVERAGE REVIEW] page={s.get('page')} paragraph={s.get('paragraph')}")
     print('[VALIDATOR] Verbatim source spans passed')
     print(f'[AGENT 1] Extracted {len(result.requirements)} requirements')
     return result

@@ -1,0 +1,49 @@
+<main class="guide" aria-labelledby="guide-title">
+  <section class="guide-intro">
+    <div>
+      <h1 id="guide-title" data-msg="navHow">Как это работает</h1>
+      <p class="lead" data-msg="guideLead">Загрузите техническое задание и получите замечания с исходными строками и предложениями по правкам.</p>
+      <div class="cta-row">
+        <a class="btn-primary" href="/audit"><span data-msg="newAudit">Новая проверка</span><span aria-hidden="true">↗</span></a>
+        <a class="btn-ghost" href="/audit?example=refund" data-msg="guideOpenExample">Попробовать пример</a>
+      </div>
+    </div>
+    <aside class="guide-preview" aria-labelledby="guide-example-title">
+      <div class="guide-preview-label" data-msg="guideExampleLabel">Пример из учебного отчёта</div>
+      <h2 id="guide-example-title" data-msg="guideExampleTitle">В файлах разный минимум возврата</h2>
+      <dl class="guide-proof">
+        <div><dt data-msg="guideApiSource">Описание API · строка 8</dt><dd>1 ₸</dd></div>
+        <div><dt data-msg="guidePolicySource">Правила возврата · строка 7</dt><dd>500 ₸</dd></div>
+      </dl>
+      <p data-msg="guideExampleNote">В отчёте можно открыть обе строки и решить, какая сумма верна.</p>
+    </aside>
+  </section>
+
+  <section class="guide-section" aria-labelledby="guide-steps-title">
+    <h2 id="guide-steps-title" data-msg="guideStepsTitle">Как провести проверку</h2>
+    <ol class="guide-steps">
+      <li class="card">
+        <h3 data-msg="addDocument">Добавьте документ</h3>
+        <p data-msg="guideUpload">Загрузите до пяти файлов PDF, DOCX, TXT или MD. Для каждого укажите роль. Одно ТЗ можно вставить текстом.</p>
+      </li>
+      <li class="card">
+        <h3 data-msg="guideDepthTitle">Выберите глубину</h3>
+        <p data-msg="guideDepth">Быстрая проверка выделяет главные риски. Глубокая также сопоставляет файлы и разбирает неясные формулировки.</p>
+      </li>
+      <li class="card">
+        <h3 data-msg="guideReadTitle">Разберите отчёт</h3>
+        <p data-msg="guideRead">Проверьте цитаты, соберите вопросы заказчику и скачайте отчёт. Исправленный документ можно проверить снова и сравнить версии.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section class="guide-section" aria-labelledby="guide-agents-title">
+    <h2 id="guide-agents-title" data-msg="guideAgentsTitle">Что проверяет ИИ</h2>
+    <p class="guide-section-copy" data-msg="guideAgentsCopy">При подключённой модели специалисты проверяют разные части ТЗ параллельно. Система сверяет цитаты и объединяет замечания в одном отчёте.</p>
+    <div class="fcards" id="agents"></div>
+    <div class="guide-local">
+      <h3 data-msg="ruleReview">Проверка по правилам</h3>
+      <p data-msg="guideLocal">Без ключа работают локальные проверки чисел, сроков, формулировок и явных противоречий. Общий балл готовности рассчитывается при проверке с ИИ.</p>
+    </div>
+  </section>
+</main>

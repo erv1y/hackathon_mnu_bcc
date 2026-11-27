@@ -414,7 +414,7 @@ Return valid JSON only.
             last_error = error
 
             print(
-                f"[VALIDATION FAILED] {error}"
+                f"[VALIDATION FAILED] {type(error).__name__}"
             )
 
             if attempt == MAX_ATTEMPTS:

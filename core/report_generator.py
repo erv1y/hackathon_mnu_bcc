@@ -69,9 +69,13 @@ def register_fonts():
     regular = fonts_dir / "arial.ttf"
     bold = fonts_dir / "arialbd.ttf"
 
+    if os.name != "nt" and (not regular.exists() or not bold.exists()):
+        fonts_dir = Path("/usr/share/fonts/truetype/dejavu")
+        regular, bold = fonts_dir / "DejaVuSans.ttf", fonts_dir / "DejaVuSans-Bold.ttf"
+
     if not regular.exists() or not bold.exists():
         raise FileNotFoundError(
-            "Arial fonts not found in Windows Fonts."
+            "Unicode fonts unavailable. Install Arial or DejaVu Sans."
         )
 
     pdfmetrics.registerFont(

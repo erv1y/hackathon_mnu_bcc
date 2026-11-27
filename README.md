@@ -1,5 +1,43 @@
 # RequirGents
 
+## REQUIRAGENTS 2.0 — веб-приложение
+
+Основной интерфейс открывается в FastAPI. Для режима Deep и Quick используется общий движок LangGraph с Gemini. Конфигурация, ограничения и команды оценки описаны в [INTEGRATION.md](INTEGRATION.md).
+
+**Windows PowerShell**
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+$env:AUDIT_DEMO_ONLY = "1"
+.\.venv\Scripts\python.exe -m uvicorn web:app --host 127.0.0.1 --port 8000
+```
+
+**Git Bash в Windows**
+
+```bash
+py -3.12 -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements.txt
+AUDIT_DEMO_ONLY=1 .venv/Scripts/python.exe -m uvicorn web:app --host 127.0.0.1 --port 8000
+```
+
+**Linux**
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+AUDIT_DEMO_ONLY=1 .venv/bin/python -m uvicorn web:app --host 127.0.0.1 --port 8000
+```
+
+Откройте `http://127.0.0.1:8000/audit?demo=1` для сравнения сохранённых отчётов. Локальные правила доступны через обычную страницу проверки. Для нового анализа получите ключ в [Google AI Studio](https://aistudio.google.com/apikey), задайте `GEMINI_API_KEY` в локальном `.env` или переменной среды, снимите `AUDIT_DEMO_ONLY` и перезапустите сервер. При необходимости задайте `GEMINI_MODEL` в `.env`. Linux PDF использует системный DejaVu Sans. Сбой API проверяйте по доступу к `generativelanguage.googleapis.com`, модели и квоте аккаунта. Настройка Windows для Streamlit и CLI приведена ниже.
+
+```bash
+docker build -t requiragents .
+docker run --rm -e AUDIT_DEMO_ONLY=1 -p 127.0.0.1:8000:8000 requiragents
+```
+
+За прокси с частным центром сертификации передайте доверенный CA сборке через `docker build --secret id=pip_ca,src=/path/to/ca-bundle.pem -t requiragents .`.
+
 **BCC-HUB × MNU FinTech Hackathon · v0.8 Release Candidate**
 
 Мультиагентный инструмент поддержки бизнес-аналитика: анализирует технические задания, выявляет потенциальные дефекты требований, сопоставляет их с исходным текстом и формирует отчёт о готовности к разработке.

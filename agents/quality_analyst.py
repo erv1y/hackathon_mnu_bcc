@@ -109,7 +109,7 @@ def analyze_quality(extraction_result, sections=None):
                 break
             except (ValueError, TypeError) as error:
                 last_error = error
-                print(f'[QUALITY CORRECTION] {error}')
+                print(f'[QUALITY CORRECTION] {type(error).__name__}')
                 payload['correction'] = {'error': str(error),
                     'instruction': 'Return complete corrected assessments for the target IDs only.'}
         else:

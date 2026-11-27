@@ -6,7 +6,7 @@ import os
 
 
 def append_sections(result, output_path, base_generator):
-    import fitz
+    import pymupdf as fitz
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, LongTable, TableStyle
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.pagesizes import A4

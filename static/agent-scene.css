@@ -1,0 +1,23 @@
+/* Фоновая 3D-сцена агентов (static/agent-scene/). Слой под всем #workspace. */
+.agent-scene-canvas{position:fixed;inset:0;width:100vw;height:100vh;z-index:-2;pointer-events:none;opacity:0;transition:opacity .9s ease}
+.agent-scene-canvas.ready{opacity:.97}
+/* Лёгкая вуаль слева сверху, чтобы заголовки и текст оставались читаемыми поверх сцены. */
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:linear-gradient(100deg,rgb(250 249 252 / .9) 0%,rgb(250 249 252 / .72) 34%,rgb(250 249 252 / .12) 62%,transparent 80%)}
+.agent-scene-overlay{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
+.agent-scene-bubble{position:absolute;left:0;top:0;max-width:220px;padding:7px 11px;border-radius:14px;background:var(--glass);border:1px solid var(--border);box-shadow:0 6px 20px rgb(var(--accent-rgb) / .12);color:var(--text);font-size:13px;font-weight:600;line-height:1.3;white-space:nowrap;opacity:0;transition:opacity .25s ease;will-change:transform}
+.agent-scene-bubble::after{content:"";position:absolute;left:50%;bottom:-6px;width:10px;height:10px;margin-left:-5px;background:inherit;border-right:1px solid var(--border);border-bottom:1px solid var(--border);transform:rotate(45deg)}
+.agent-scene-bubble.show{opacity:1}
+.agent-scene-bubble.pipeline{border-color:var(--accent-border);color:var(--accent)}
+.agent-scene-bubble.done{border-color:var(--low-border);background:var(--low-bg);color:var(--low-text)}
+.agent-scene-card{position:fixed;left:0;top:0;z-index:30;display:grid;gap:2px;min-width:170px;max-width:240px;padding:10px 12px;border-radius:14px;background:var(--glass);border:1px solid var(--border2);box-shadow:0 12px 32px rgb(23 19 31 / .14);font-size:12.5px;color:var(--muted);pointer-events:none}
+.agent-scene-card strong{font-size:14px;color:var(--text)}
+.agent-scene-card-role{color:var(--accent);font-weight:600}
+.agent-scene-card-status{font-size:12px}
+.agent-scene-chip{position:fixed;right:18px;bottom:18px;z-index:5;padding:7px 12px;border-radius:999px;background:var(--glass);border:1px solid var(--accent-border);color:var(--accent);font-size:12.5px;font-weight:700;box-shadow:0 6px 18px rgb(var(--accent-rgb) / .14);pointer-events:none}
+html[data-agent-scene=completed] .agent-scene-chip{border-color:var(--low-border);color:var(--low-text);background:var(--low-bg)}
+@media (max-width:760px){
+  .agent-scene-canvas.ready{opacity:.55}
+  body::before{background:rgb(250 249 252 / .55)}
+  .agent-scene-bubble{font-size:12px;max-width:160px}
+}
+@media print{.agent-scene-canvas,.agent-scene-overlay,.agent-scene-chip,.agent-scene-card,body::before{display:none!important}}

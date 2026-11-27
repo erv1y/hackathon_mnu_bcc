@@ -1,0 +1,357 @@
+{
+  "id": "fintech-kz",
+  "version": "1.3.0",
+  "title": "Финансовые продукты · Казахстан",
+  "context": "Общий профиль финансовых продуктов Республики Казахстан. Применимость требований зависит от роли сервиса, вида операции и данных. Не считай каждый документ проектом банка или платёжной организации.",
+  "guidance": "Объясняй последствия на языке пользователя: повторное списание, зависшие деньги, спорный статус или утечка данных. Для противоречий приводи разные фрагменты. Для пробела укажи затронутый сценарий. В исправлении фиксируй ожидаемое поведение и проверяемый результат. Если бизнес-значение лимита или срока неизвестно, явно обозначь, какое решение должен принять владелец продукта.",
+  "modes": {
+    "quick": {
+      "criteria": [
+        "payment.retry", "payment.status", "payment.refund", "client.limits", "client.identity",
+        "data.card", "data.privacy", "data.access", "data.messages",
+        "spec.contradiction", "spec.testability", "spec.sanity"
+      ],
+      "minimum_severity": "High",
+      "max_findings": 4,
+      "ambiguities": false,
+      "feasibility": true
+    },
+    "deep": {"minimum_severity": "Low", "ambiguities": true, "feasibility": true}
+  },
+  "ambiguity_dictionary": {
+    "timing": {
+      "ru": {
+        "terms": ["достаточно быстро", "быстро", "в разумные сроки", "своевременно"],
+        "question": "От какого события отсчитываем срок, при какой нагрузке и каков допустимый максимум?",
+        "example": "Показать подтверждение не позднее 2 секунд после ответа сервера при согласованной тестовой нагрузке. Срок 2 секунды — пример для обсуждения."
+      },
+      "kk": {
+        "terms": ["жеткілікті жылдам", "жылдам", "уақтылы", "ақылға қонымды мерзімде"],
+        "question": "Уақыт қай оқиғадан басталады, қандай жүктеме және ең ұзақ мерзім қолданылады?",
+        "example": "Келісілген сынақ жүктемесінде сервер жауабынан кейін растауды 2 секунд ішінде көрсету. 2 секунд — талқылауға арналған мысал."
+      },
+      "en": {
+        "terms": ["reasonably quickly", "quickly", "in a timely manner", "within a reasonable time"],
+        "question": "Which event starts the clock, what load applies, and what is the maximum acceptable delay?",
+        "example": "Display confirmation within 2 seconds of the server response at the agreed test load. Two seconds is a discussion example."
+      }
+    },
+    "correctness": {
+      "ru": {
+        "terms": ["корректно", "надлежащим образом", "должным образом"],
+        "question": "Какие входные данные и наблюдаемый результат подтверждают правильность?",
+        "example": "При принятой операции состояние в интерфейсе совпадает с подтверждённым состоянием сервера."
+      },
+      "kk": {
+        "terms": ["дұрыс түрде", "дұрыс", "тиісті түрде"],
+        "question": "Қандай кіріс деректері мен бақыланатын нәтиже дұрыстықты растайды?",
+        "example": "Қабылданған операцияның интерфейстегі күйі сервер растаған күйге сәйкес келеді."
+      },
+      "en": {
+        "terms": ["correctly", "properly", "as appropriate"],
+        "question": "Which inputs and observable result demonstrate correctness?",
+        "example": "For an accepted operation, the displayed state matches the server-confirmed state."
+      }
+    },
+    "optional": {
+      "ru": {
+        "terms": ["при необходимости", "при возможности", "как правило"],
+        "question": "Какое условие включает действие и что происходит в остальных случаях?",
+        "example": "Выполнять действие только когда истинно явно указанное условие. Для остальных случаев указать ожидаемое состояние."
+      },
+      "kk": {
+        "terms": ["қажет болған жағдайда", "мүмкіндігінше", "әдетте"],
+        "question": "Әрекетті қандай шарт бастайды, ал қалған жағдайларда не болады?",
+        "example": "Әрекетті анық көрсетілген шарт орындалғанда іске қосу. Қалған жағдайлардағы күйді бөлек жазу."
+      },
+      "en": {
+        "terms": ["if necessary", "where possible", "as needed", "usually"],
+        "question": "Which condition triggers this action, and what happens otherwise?",
+        "example": "Perform the action when the documented condition is true. Specify the expected state for all other cases."
+      }
+    },
+    "notification": {
+      "ru": {
+        "terms": ["система уведомляет", "отправляет уведомление"],
+        "question": "Кого уведомляем, в каком канале, после какого события и за какое время?",
+        "example": "После подтверждения операции показать её итог владельцу операции в истории и указать отдельно допустимую задержку."
+      },
+      "kk": {
+        "terms": ["жүйе хабарлайды", "хабарлама жібереді"],
+        "question": "Кімге, қандай арнада, қай оқиғадан кейін және қанша уақытта хабарлаймыз?",
+        "example": "Операция расталғанда нәтижені операция иесінің тарихында көрсету және рұқсат етілген кешігуді бөлек жазу."
+      },
+      "en": {
+        "terms": ["the system notifies", "sends a notification"],
+        "question": "Who is notified, through which channel, after what event, and by when?",
+        "example": "After confirmation, show the result in the operation owner's history and specify the permitted delay separately."
+      }
+    }
+  },
+  "agents": {
+    "payments": {
+      "title": "Платежи и переводы",
+      "scope": "Списания, повторные запросы, статусы операций, возвраты и комиссии.",
+      "role": "Разбери движение денег по шагам. Укажи, где сумма, статус операции или возврат могут разойтись между системами.",
+      "style": "pay"
+    },
+    "kyc_aml": {
+      "title": "Полнота и согласованность",
+      "scope": "Противоречия между разделами, пропуски и условия допуска к операциям.",
+      "role": "Проверь, согласованы ли условия и ожидаемые результаты между разделами. Проверь применимые условия допуска, проверки клиента и ограничения. Показывай конкретное место каждого пропуска.",
+      "style": "kyc"
+    },
+    "security": {
+      "title": "Защита данных",
+      "scope": "Карточные и личные данные, права доступа и доверие к сообщениям от других систем.",
+      "role": "Разбери путь чувствительных данных и границы доверия. Формулируй защитные требования и следствия для пользователя без инструкций по атаке.",
+      "style": "sec"
+    },
+    "logic": {
+      "title": "Логика и тестируемость",
+      "scope": "Размытые формулировки, критерии приёмки и поведение при сбоях.",
+      "role": "Посмотри на ТЗ глазами разработчика и тестировщика. Найди сценарии без проверяемого результата и пропущенные пути при сбоях.",
+      "style": "logic"
+    }
+  },
+  "criteria": {
+    "payment.retry": {
+      "title": "Повтор не создаёт второе списание",
+      "agents": ["payments"],
+      "rule": "Для повторных отправок запроса на оплату или перевод проверь, что одна операция приводит к одному денежному результату, в том числе после сетевого сбоя.",
+      "default_severity": "High"
+    },
+    "payment.status": {
+      "title": "Известно, что происходит с операцией",
+      "agents": ["payments"],
+      "rule": "Для описанных денежных операций проверь состояния и переходы, особенно при неизвестном исходе запроса, задержке ответа и повторном уведомлении.",
+      "default_severity": "High"
+    },
+    "payment.refund": {
+      "title": "Понятно, как вернуть деньги",
+      "agents": ["payments"],
+      "rule": "Если возврат входит в объём ТЗ, проверь условия и статусы возврата, ограничения по сумме и правила для повторного запроса. Не требуй частичных возвратов или оспаривания, если они явно вне объёма.",
+      "default_severity": "Medium",
+      "references": ["kz-payments"]
+    },
+    "payment.amount": {
+      "title": "Сумма и комиссия считаются одинаково",
+      "agents": ["payments"],
+      "rule": "Проверь точность денежных расчётов, валюту и правило округления, если ТЗ описывает расчёт комиссий или преобразование сумм.",
+      "default_severity": "Medium"
+    },
+    "client.identity": {
+      "title": "Понятно, кому разрешена операция",
+      "agents": ["kyc_aml"],
+      "rule": "Если продукт открывает клиенту финансовые операции, проверь описание допуска, подтверждения личности там, где это требуется, и поведения до завершения проверки. Не распространяй это на справочные экраны.",
+      "default_severity": "High",
+      "references": ["kz-aml"]
+    },
+    "client.limits": {
+      "title": "Понятно, какие операции ограничены",
+      "agents": ["kyc_aml"],
+      "rule": "Если лимиты предусмотрены для этого вида операций, проверь правила, условия превышения и реакцию системы. Не подставляй суммы из предположений.",
+      "default_severity": "Medium",
+      "references": ["kz-aml"]
+    },
+    "client.monitoring": {
+      "title": "Описаны контроль рисков и запись действий",
+      "agents": ["kyc_aml"],
+      "rule": "Когда применимость следует из сценария, проверь обработку совпадений при проверке клиентов, подозрительных операций и запись решений. Не подставляй юридические сроки хранения.",
+      "default_severity": "Medium",
+      "references": ["kz-aml"]
+    },
+    "data.card": {
+      "title": "Карточные данные не попадают в лишние места",
+      "agents": ["security"],
+      "rule": "Если продукт имеет дело с данными карт, проверь, что лишние данные не хранятся в профиле и не раскрываются. Обрати внимание на код безопасности карты, подмену карты безопасным идентификатором и скрытие части номера.",
+      "default_severity": "High",
+      "references": ["pci-dss"]
+    },
+    "data.privacy": {
+      "title": "Личные данные видят только те, кому это нужно",
+      "agents": ["security"],
+      "rule": "Проверь описание защиты чувствительной информации при хранении, передаче и отображении. Замечание должно указывать на конкретный поток или доступ, описанный в ТЗ.",
+      "default_severity": "High",
+      "references": ["kz-personal-data"]
+    },
+    "data.access": {
+      "title": "Важные действия доступны только нужным людям",
+      "agents": ["security"],
+      "rule": "Для описанных действий сотрудников и администраторов проверь роли, ограничения доступа и запись важных изменений.",
+      "default_severity": "Medium"
+    },
+    "data.messages": {
+      "title": "Сервис проверяет сообщения от платёжной системы",
+      "agents": ["security"],
+      "rule": "Если входящее сообщение меняет денежное состояние, проверь требования к подтверждению его источника и обработке повторов.",
+      "default_severity": "High"
+    },
+    "spec.contradiction": {
+      "title": "Правила в разных частях ТЗ согласованы",
+      "agents": ["kyc_aml"],
+      "rule": "Найди несовместимые требования для одинаковых условий. Сошлись на двух разных фрагментах и объясни, какое правило должно действовать.",
+      "default_severity": "High",
+      "min_quotes": 2
+    },
+    "spec.completeness": {
+      "title": "У каждой операции есть условия и результат",
+      "agents": ["kyc_aml"],
+      "rule": "Найди отсутствующий вход, обязательное условие или ожидаемый результат явно описанного сценария. Приведи фрагмент, где нужен недостающий параметр. Не требуй функций вне согласованного объёма.",
+      "default_severity": "Medium"
+    },
+    "spec.testability": {
+      "title": "Результат можно проверить",
+      "agents": ["logic"],
+      "rule": "Найди конкретное требование, где не определён измеримый результат, срок без критерия или способ однозначной проверки. Предложи измеримую формулировку или вопрос о недостающем бизнес-параметре.",
+      "default_severity": "Medium"
+    },
+    "spec.edges": {
+      "title": "Предусмотрены сбои и исключения",
+      "agents": ["logic"],
+      "rule": "Ищи пропущенный негативный сценарий, который следует из описанного поведения и не покрыт более конкретным финансовым критерием. Не расширяй явно ограниченный объём проекта.",
+      "default_severity": "Medium"
+    },
+    "spec.dependencies": {
+      "title": "Зависимые операции не теряют согласованность",
+      "agents": ["logic"],
+      "rule": "Проверь, что для зависимых операций описаны порядок, состояние после отказа зависимого шага и восстановление согласованности. Привяжи к условию и результату из ТЗ.",
+      "default_severity": "Medium"
+    },
+    "spec.sanity": {
+      "title": "Описанное правило можно выполнить",
+      "agents": ["logic"],
+      "rule": "Ищи явно невозможные условия, например пустой допустимый диапазон, отрицательное время ожидания, взаимоисключающие условия одного перехода. Назови доказуемую причину и вопрос заказчику. При противоречии нескольких мест приводи оба.",
+      "default_severity": "High"
+    }
+  },
+  "references": {
+    "kz-payments": {
+      "title": "Закон РК «О платежах и платежных системах»",
+      "url": "https://adilet.zan.kz/rus/docs/Z1600000011"
+    },
+    "kz-aml": {
+      "title": "Закон РК № 191-IV о финансовом мониторинге",
+      "url": "https://adilet.zan.kz/rus/docs/Z090000191_"
+    },
+    "kz-personal-data": {
+      "title": "Закон РК «О персональных данных и их защите»",
+      "url": "https://adilet.zan.kz/rus/docs/Z1300000094"
+    },
+    "pci-dss": {
+      "title": "PCI SSC · стандарт защиты карточных данных",
+      "url": "https://www.pcisecuritystandards.org/standards/pci-dss/"
+    }
+  },
+  "scoring": {
+    "weights": { "High": 15, "Medium": 7, "Low": 2 },
+    "good_threshold": 80,
+    "warning_threshold": 50,
+    "count_missing": true
+  },
+  "report": {
+    "title": "REQUIRAGENTS · Отчёт проверки технического задания",
+    "filename": "requiragents-audit-report",
+    "group_by": "severity",
+    "fields": ["evidence", "issue", "suggestion", "criterion", "references", "contributors"],
+    "exports": ["markdown", "json", "pdf"],
+    "show_coverage": true,
+    "include_context": true
+  },
+  "examples": [
+    {
+      "label": "Оплата заказа",
+      "text": "1. Покупатель может оплатить заказ картой.\n2. При сетевой ошибке покупатель может отправить оплату заново. Каждый такой запрос создаёт новое списание.\n3. При успешной оплате заказ получает статус «Оплачен», при отказе — «Не оплачен».\n4. Код безопасности карты сохраняется в профиле после оплаты.\n5. Подтверждение оплаты должно отображаться достаточно быстро.\n6. Покупатель видит чек сразу после успешной оплаты.\n7. Покупатель видит чек только после ручного подтверждения оператором."
+    },
+    {
+      "label": "Перевод денег",
+      "text": "1. Пользователь может отправить перевод по номеру телефона получателя.\n2. Комиссия составляет 1% от суммы, округление на усмотрение разработчика.\n3. Если получатель не зарегистрирован, деньги списываются и ожидают регистрации получателя."
+    },
+    {
+      "label": "Подписка",
+      "text": "1. Клиент оплачивает подписку раз в месяц.\n2. После любой ошибки система повторяет списание каждый час.\n3. Администратор может изменить цену подписки, новая цена применяется со следующего списания."
+    }
+  ],
+  "translations": {
+    "en": {
+      "title": "Financial products · Kazakhstan",
+      "report_title": "REQUIRAGENTS · Specification review report",
+      "agents": {
+        "payments": { "title": "Payments and transfers", "scope": "Charges, repeat requests, payment status, refunds and fees." },
+        "kyc_aml": { "title": "Completeness and consistency", "scope": "Conflicts between sections, gaps and who can make a transaction." },
+        "security": { "title": "Data protection", "scope": "Card and personal data, access rights and messages from other systems." },
+        "logic": { "title": "Logic and testability", "scope": "Vague wording, acceptance criteria and what happens when something fails." }
+      },
+      "criteria": {
+        "payment.retry": "A repeat request does not charge twice",
+        "payment.status": "The payment status is clear",
+        "payment.refund": "Refund rules are clear",
+        "payment.amount": "Amounts and fees are calculated consistently",
+        "client.identity": "It is clear who may make a transaction",
+        "client.limits": "Transaction limits are clear",
+        "client.monitoring": "Risk checks and action records are described",
+        "data.card": "Card data is kept only where needed",
+        "data.privacy": "Personal data is visible only to those who need it",
+        "data.access": "Only authorized people can take sensitive actions",
+        "data.messages": "The service verifies messages from the payment system",
+        "spec.contradiction": "Rules agree across the specification",
+        "spec.completeness": "Each operation has conditions and an expected result",
+        "spec.testability": "The expected result can be tested",
+        "spec.edges": "Errors and edge cases are covered",
+        "spec.dependencies": "Dependent operations stay consistent",
+        "spec.sanity": "The rule is feasible"
+      },
+      "references": {
+        "kz-payments": "Kazakhstan law on payments and payment systems",
+        "kz-aml": "Kazakhstan law No. 191-IV on financial monitoring",
+        "kz-personal-data": "Kazakhstan law on personal data and its protection",
+        "pci-dss": "PCI SSC · card data protection standard"
+      },
+      "examples": [
+        { "label": "Checkout", "text": "1. The customer can pay by card.\n2. After a network error, the customer can send the payment again. Every retry creates a new charge.\n3. A successful payment marks the order as paid. A decline marks it unpaid.\n4. The card security code is saved in the customer profile after checkout.\n5. Payment confirmation should appear reasonably quickly.\n6. The customer sees the receipt immediately after a successful payment.\n7. The customer sees the receipt only after manual approval by an operator." },
+        { "label": "Money transfer", "text": "1. A customer can send money to another customer by phone number.\n2. The fee is 1% of the amount and developers choose how to round it.\n3. If the recipient has no account, the money is charged and held until they sign up." },
+        { "label": "Subscription", "text": "1. The customer pays for the subscription once a month.\n2. After any error, the service retries the charge every hour.\n3. An administrator can change the subscription price for the next charge." }
+      ]
+    },
+    "kk": {
+      "title": "Қаржы өнімдері · Қазақстан",
+      "report_title": "REQUIRAGENTS · Техникалық тапсырманы тексеру есебі",
+      "agents": {
+        "payments": { "title": "Төлемдер мен аударымдар", "scope": "Ақша алу, қайталанған сұраулар, төлем күйі, қайтарымдар мен комиссиялар." },
+        "kyc_aml": { "title": "Толықтық пен сәйкестік", "scope": "Бөлімдер арасындағы қайшылықтар, жетіспейтін шарттар және операцияға рұқсат." },
+        "security": { "title": "Деректерді қорғау", "scope": "Карта мен жеке деректер, қол жеткізу құқықтары және басқа жүйелердің хабарламалары." },
+        "logic": { "title": "Логика және тексеру", "scope": "Түсініксіз тұстар, қабылдау өлшемдері және қате кезіндегі әрекет." }
+      },
+      "criteria": {
+        "payment.retry": "Қайталанған сұрау ақшаны екінші рет алмайды",
+        "payment.status": "Төлемнің күйі түсінікті",
+        "payment.refund": "Ақшаны қайтару ережелері анық",
+        "payment.amount": "Сома мен комиссия бірдей есептеледі",
+        "client.identity": "Операцияны кім жасай алатыны анық",
+        "client.limits": "Операция шектеулері түсінікті",
+        "client.monitoring": "Тәуекелді тексеру және әрекеттерді тіркеу сипатталған",
+        "data.card": "Карта деректері қажет жерде ғана сақталады",
+        "data.privacy": "Жеке деректер қажет адамдарға ғана көрінеді",
+        "data.access": "Маңызды әрекеттерді рұқсаты бар адамдар ғана орындай алады",
+        "data.messages": "Сервис төлем жүйесінен келген хабарламаларды тексереді",
+        "spec.contradiction": "Құжаттың әр бөлігіндегі ережелер үйлеседі",
+        "spec.completeness": "Әр операцияның шарттары мен күтілетін нәтижесі бар",
+        "spec.testability": "Күтілетін нәтижені тексеруге болады",
+        "spec.edges": "Қателер мен ерекше жағдайлар ескерілген",
+        "spec.dependencies": "Байланысты операциялардың күйі үйлесімді",
+        "spec.sanity": "Ережені орындауға болады"
+      },
+      "references": {
+        "kz-payments": "ҚР «Төлемдер және төлем жүйелері туралы» Заңы",
+        "kz-aml": "ҚР қаржы мониторингі жөніндегі № 191-IV Заңы",
+        "kz-personal-data": "ҚР «Дербес деректер және оларды қорғау туралы» Заңы",
+        "pci-dss": "PCI SSC · карта деректерін қорғау стандарты"
+      },
+      "examples": [
+        { "label": "Тапсырыс төлемі", "text": "1. Сатып алушы тапсырысты картамен төлей алады.\n2. Желіде қате болса, сатып алушы төлемді қайта жібере алады. Әр қайталауда ақша қайта алынады.\n3. Төлем сәтті болса, тапсырыс «Төленді» күйіне өтеді. Төлем өтпесе, күйі «Төленбеді» болады.\n4. Төлемнен кейін картаның қауіпсіздік коды клиент профилінде сақталады.\n5. Төлем расталғаны жеткілікті жылдам көрсетілуі тиіс.\n6. Сатып алушы төлем сәтті аяқталған соң түбіртекті бірден көреді.\n7. Сатып алушы түбіртекті оператор қолмен растағаннан кейін ғана көреді." },
+        { "label": "Ақша аударымы", "text": "1. Клиент телефон нөмірі арқылы басқа клиентке ақша аудара алады.\n2. Комиссия соманың 1%-ын құрайды. Оны қалай дөңгелектеуді әзірлеуші өзі шешеді.\n3. Алушы тіркелмеген болса, ақша жіберушіден алынып, алушы тіркелгенше күтеді." },
+        { "label": "Жазылым", "text": "1. Клиент жазылым ақысын айына бір рет төлейді.\n2. Кез келген қатеден кейін сервис ақшаны сағат сайын қайта алуға тырысады.\n3. Әкімші жазылым бағасын келесі төлемге өзгерте алады." }
+      ]
+    }
+  }
+}

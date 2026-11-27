@@ -1,0 +1,40 @@
+{
+  "id": "pruvia-quality-synthetic",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "vague-time",
+      "text": "# Результат перевода\n\nПриложение показывает новый статус перевода достаточно быстро.",
+      "labels": [
+        {"requirement": "REQ-001", "criterion": "verifiability", "status": "fail", "anchors": ["достаточно быстро"]},
+        {"requirement": "REQ-001", "criterion": "solution", "status": "pass"}
+      ]
+    },
+    {
+      "id": "receipt-conflict",
+      "text": "# Чек\n\n## Платёж\nПосле подтверждения оплаты чек сразу становится доступен клиенту.\n\n## История\nДо ручной сверки клиент не может открыть чек, даже если оплата подтверждена.",
+      "labels": [
+        {"requirement": "SET", "criterion": "consistency", "status": "fail", "anchors": ["чек сразу становится доступен", "До ручной сверки клиент не может открыть чек"]},
+        {"requirement": "REQ-001", "criterion": "clarity", "status": "pass"},
+        {"requirement": "REQ-002", "criterion": "clarity", "status": "pass"}
+      ]
+    },
+    {
+      "id": "clear-timing",
+      "text": "# Результат оплаты\n\nВ тестовой среде приложение показывает «Оплачен» не позднее чем через две секунды после получения сервером статуса OK от платёжного партнёра.",
+      "labels": [
+        {"requirement": "REQ-001", "criterion": "clarity", "status": "pass"},
+        {"requirement": "REQ-001", "criterion": "verifiability", "status": "pass"},
+        {"requirement": "REQ-001", "criterion": "atomicity", "status": "pass"}
+      ]
+    },
+    {
+      "id": "independent-duties",
+      "text": "# Разные операции\n\nСервис показывает баланс карты после входа клиента и удаляет принятые ранее заявки на выпуск карты после истечения срока хранения.",
+      "labels": [
+        {"requirement": "REQ-001", "criterion": "atomicity", "status": "fail", "anchors": ["показывает баланс карты", "удаляет принятые ранее заявки"]},
+        {"requirement": "REQ-001", "criterion": "completeness", "status": "fail", "anchors": ["после истечения срока хранения"]}
+      ]
+    }
+  ]
+}

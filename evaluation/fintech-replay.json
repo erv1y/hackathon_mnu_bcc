@@ -1,0 +1,249 @@
+{
+  "dataset_id": "fintech-starter",
+  "dataset_version": "1.1.0",
+  "profile_id": "fintech-kz",
+  "profile_version": "1.3.0",
+  "observations": {
+    "checkout-before": {
+      "payments": [
+        {
+          "criterion_id": "payment.retry",
+          "severity": "High",
+          "title": "Повторная оплата списывает деньги дважды",
+          "quote": "Каждый такой запрос создаёт новое списание.",
+          "issue": "После сбоя покупатель может повторить оплату и заплатить за тот же заказ дважды.",
+          "suggestion": "Повторный запрос с тем же идентификатором заказа и попытки возвращает состояние первой попытки и не создаёт новое списание.",
+          "fix_kind": "rewrite"
+        },
+        {
+          "criterion_id": "payment.status",
+          "severity": "Medium",
+          "title": "Статус отказа требует проверки",
+          "quote": "При успешной оплате заказ получает статус «Оплачен», а при отказе заказ всё равно помечается оплаченным.",
+          "issue": "Покупатель может увидеть оплату там, где её не было.",
+          "suggestion": "Показывать статус «Оплачен» только после подтверждения."
+        }
+      ],
+      "kyc_aml": [
+        {
+          "criterion_id": "spec.contradiction",
+          "severity": "High",
+          "title": "Два разных правила выдачи чека",
+          "quote": "Покупатель видит чек сразу после успешной оплаты.",
+          "related_quotes": [
+            "Покупатель видит чек только после ручного подтверждения оператором."
+          ],
+          "issue": "Покупатель может ждать чек, а команды разработки и тестирования — ожидать разные результаты.",
+          "suggestion": "Установить одно правило выдачи чека и обновить оба пункта.",
+          "clarification": "Чек выдаём сразу после оплаты или после подтверждения оператора?"
+        }
+      ],
+      "security": [
+        {
+          "criterion_id": "data.card",
+          "severity": "High",
+          "title": "Код карты остаётся в профиле",
+          "quote": "Код безопасности карты сохраняется в профиле после оплаты.",
+          "issue": "При утечке профиля вместе с ним может раскрыться код безопасности карты.",
+          "suggestion": "Клиент вводит код на странице платёжного партнёра. Сервис сохраняет только статус и идентификатор операции.",
+          "fix_kind": "rewrite"
+        }
+      ],
+      "logic": [
+        {
+          "criterion_id": "spec.testability",
+          "severity": "Medium",
+          "title": "Не указан срок показа результата",
+          "quote": "Подтверждение оплаты должно отображаться достаточно быстро.",
+          "issue": "Команда не сможет одинаково определить, прошёл ли тест на скорость.",
+          "suggestion": "Согласовать максимальный срок показа статуса после получения ответа от платёжного партнёра и условия измерения. Указать оба значения в ТЗ.",
+          "clarification": "За какое время после ответа платёжного партнёра интерфейс должен показать результат и в каких условиях это измерять?"
+        }
+      ]
+    },
+    "checkout-after": { "payments": [], "kyc_aml": [], "security": [], "logic": [] },
+    "fee-rounding": {
+      "payments": [
+        {
+          "criterion_id": "payment.amount",
+          "severity": "Medium",
+          "title": "Комиссия округляется по-разному",
+          "quote": "Комиссия составляет 1% от суммы, округление на усмотрение разработчика.",
+          "issue": "Два клиента могут видеть разные суммы при одинаковом переводе.",
+          "suggestion": "Зафиксировать единое правило округления комиссии до двух знаков и проверить суммы на границе округления."
+        }
+      ],
+      "kyc_aml": [], "security": [], "logic": []
+    },
+    "conflicting-history": {
+      "payments": [], "logic": [], "security": [],
+      "kyc_aml": [
+        {
+          "criterion_id": "spec.contradiction",
+          "severity": "High",
+          "title": "Два правила доступа к истории",
+          "quote": "После закрытия счёта история переводов всегда доступна клиенту в приложении.",
+          "related_quotes": ["После закрытия счёта клиент не может открыть историю переводов в приложении."],
+          "issue": "Клиент может потерять доступ к своей истории, а команды реализации и проверки ожидают разные результаты.",
+          "suggestion": "Согласовать единое правило доступа к истории после закрытия счёта и заменить им оба пункта. Добавить проверку доступа на закрытом счёте."
+        }
+      ]
+    },
+    "public-info": { "payments": [], "kyc_aml": [], "security": [], "logic": [] },
+    "customer-gate": {
+      "payments": [], "security": [], "logic": [],
+      "kyc_aml": [
+        {
+          "criterion_id": "client.identity",
+          "severity": "High",
+          "title": "Пропущено условие допуска к переводу",
+          "quote": "Отсутствует в тексте ТЗ",
+          "issue": "Команда может разрешить перевод сразу после подтверждения номера, хотя в этом проекте проверка личности обязательна.",
+          "suggestion": "Разрешать первый перевод только после успешной проверки личности. До неё показывать клиенту, какой шаг нужно завершить."
+        }
+      ]
+    },
+    "exposed-profile": {
+      "payments": [], "kyc_aml": [], "logic": [],
+      "security": [
+        {
+          "criterion_id": "data.privacy",
+          "severity": "High",
+          "title": "Личные данные доступны по ссылке",
+          "quote": "При формировании публичной ссылки в ответ включаются адрес и номер документа клиента.",
+          "issue": "Получатель ссылки может увидеть личные данные клиента без его участия.",
+          "suggestion": "Исключить адрес и номер документа из ответа по публичной ссылке. Просмотр этих полей разрешить только после проверки прав доступа."
+        }
+      ]
+    },
+    "refund-controls": {
+      "payments": [
+        {
+          "criterion_id": "payment.refund",
+          "severity": "High",
+          "title": "Возврат может быть больше списания",
+          "quote": "Сумма возврата может превышать исходное списание.",
+          "issue": "Сервис может вернуть клиенту больше, чем получил за операцию.",
+          "suggestion": "Отклонять возврат, если вместе с предыдущими возвратами его сумма превысит исходное списание."
+        },
+        {
+          "criterion_id": "payment.refund",
+          "severity": "High",
+          "title": "Повтор создаёт второй возврат",
+          "quote": "Каждый повтор одного запроса на возврат создаёт новую операцию.",
+          "issue": "Один сбой связи может привести к нескольким возвратам по одному действию оператора.",
+          "suggestion": "Возвращать результат исходного запроса при повторе с тем же идентификатором возврата."
+        }
+      ],
+      "kyc_aml": [], "security": [], "logic": []
+    },
+    "checkout-before-en": {
+      "payments": [
+        {
+          "criterion_id": "payment.retry", "severity": "High",
+          "title": "A retry charges the customer twice",
+          "quote": "Every retry creates a new charge.",
+          "issue": "A customer may retry after a connection error and pay twice for the same order.",
+          "suggestion": "If the order and attempt IDs match, return the status of the original attempt without creating another charge.",
+          "fix_kind": "rewrite"
+        },
+        {
+          "criterion_id": "payment.status", "severity": "Medium",
+          "title": "The decline status needs a second look",
+          "quote": "A successful payment marks the order as paid. A decline also marks the order paid.",
+          "issue": "The customer could see a paid order when no payment went through.",
+          "suggestion": "Show paid only after the payment partner confirms the payment."
+        }
+      ],
+      "kyc_aml": [
+        {
+          "criterion_id": "spec.contradiction",
+          "severity": "High",
+          "title": "Two different rules for showing the receipt",
+          "quote": "The customer sees the receipt immediately after a successful payment.",
+          "related_quotes": [
+            "The customer sees the receipt only after manual approval by an operator."
+          ],
+          "issue": "Customers may wait for a receipt while developers and testers expect different outcomes.",
+          "suggestion": "Agree on one receipt rule and update both requirements.",
+          "clarification": "Does the receipt appear after payment or after approval by an operator?"
+        }
+      ],
+      "security": [
+        {
+          "criterion_id": "data.card", "severity": "High",
+          "title": "The profile holds the card security code",
+          "quote": "The card security code is saved in the customer profile after checkout.",
+          "issue": "A profile data leak could expose the security code.",
+          "suggestion": "Collect the code on the payment partner's page. Keep only the payment status and ID in this service.",
+          "fix_kind": "rewrite"
+        }
+      ],
+      "logic": [
+        {
+          "criterion_id": "spec.testability", "severity": "Medium",
+          "title": "No deadline for showing the result",
+          "quote": "Payment confirmation should appear reasonably quickly.",
+          "issue": "Two teams could disagree about whether a speed test has passed.",
+          "suggestion": "Agree how soon the status must appear after the server receives it. State that time and the test conditions in the specification.",
+          "clarification": "How soon must the status appear after the payment partner responds, and under what test conditions?"
+        }
+      ]
+    },
+    "checkout-after-en": { "payments": [], "kyc_aml": [], "security": [], "logic": [] },
+    "checkout-before-kk": {
+      "payments": [
+        {
+          "criterion_id": "payment.retry", "severity": "High",
+          "title": "Қайта төлеу ақшаны екі рет алады",
+          "quote": "Әр қайталауда ақша қайта алынады.",
+          "issue": "Байланыс үзілсе, клиент төлемді қайталап, бір тапсырыс үшін екі рет төлеуі мүмкін.",
+          "suggestion": "Тапсырыс нөмірі мен әрекет нөмірі бірдей сұрау қайталанса, бірінші әрекеттің күйін көрсетіп, ақшаны қайта алмау.",
+          "fix_kind": "rewrite"
+        },
+        {
+          "criterion_id": "payment.status", "severity": "Medium",
+          "title": "Төлем өтпегендегі күйді тексеру қажет",
+          "quote": "Төлем сәтті болса, тапсырыс «Төленді» күйіне өтеді. Төлем өтпесе де, тапсырыс төленген болып көрінеді.",
+          "issue": "Клиент төлем өтпесе де, тапсырысты төленген деп көруі мүмкін.",
+          "suggestion": "«Төленді» күйін төлем серіктесі операцияны растағаннан кейін ғана көрсету."
+        }
+      ],
+      "kyc_aml": [
+        {
+          "criterion_id": "spec.contradiction",
+          "severity": "High",
+          "title": "Түбіртек көрсетуге екі түрлі ереже берілген",
+          "quote": "Сатып алушы төлем сәтті аяқталған соң түбіртекті бірден көреді.",
+          "related_quotes": [
+            "Сатып алушы түбіртекті оператор қолмен растағаннан кейін ғана көреді."
+          ],
+          "issue": "Сатып алушы түбіртекті күтіп қалуы, ал әзірлеушілер мен сынақшылар әртүрлі нәтиже күтуі мүмкін.",
+          "suggestion": "Түбіртек көрсетуге бір ереже бекітіп, екі тармақты да жаңартыңыз.",
+          "clarification": "Түбіртек төлемнен кейін бірден көрсетіле ме, әлде оператор растағаннан кейін бе?"
+        }
+      ],
+      "security": [
+        {
+          "criterion_id": "data.card", "severity": "High",
+          "title": "Картаның қауіпсіздік коды профильде қалады",
+          "quote": "Төлемнен кейін картаның қауіпсіздік коды клиент профилінде сақталады.",
+          "issue": "Профиль деректері тарап кетсе, картаның қауіпсіздік коды да ашылуы мүмкін.",
+          "suggestion": "Қауіпсіздік кодын төлем серіктесінің бетінде енгізу. Сервиске төлемнің күйі мен нөмірін ғана сақтау.",
+          "fix_kind": "rewrite"
+        }
+      ],
+      "logic": [
+        {
+          "criterion_id": "spec.testability", "severity": "Medium",
+          "title": "Нәтижені көрсету мерзімі белгісіз",
+          "quote": "Төлем расталғаны жеткілікті жылдам көрсетілуі тиіс.",
+          "issue": "Әзірлеуші мен сынақ жүргізетін маман «жеткілікті жылдам» дегенді әртүрлі түсінуі мүмкін.",
+          "suggestion": "Сервер жауап алғаннан кейін күй қанша уақытта көрсетілетінін келісу. Уақыт пен өлшеу шарттарын техникалық тапсырмаға енгізу.",
+          "clarification": "Төлем серіктесі жауап берген соң күй қанша уақытта көрсетіледі және оны қандай жағдайда өлшейміз?"
+        }
+      ]
+    },
+    "checkout-after-kk": { "payments": [], "kyc_aml": [], "security": [], "logic": [] }
+  }
+}

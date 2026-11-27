@@ -181,7 +181,7 @@ def analyze_consistency(extraction_result, sections=None):
                 break
             except (ValueError, TypeError) as error:
                 last_error = error
-                print(f'[CONSISTENCY CORRECTION] {error}')
+                print(f'[CONSISTENCY CORRECTION] {type(error).__name__}')
                 payload['correction'] = {'error': str(error), 'instruction':
                     'Return the complete corrected findings. Keep supported findings and use only real IDs.'}
         else:

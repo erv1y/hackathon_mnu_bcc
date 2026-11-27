@@ -35,3 +35,8 @@ Hackathon.py
 # Experimental model comparison
 compare_models_v08.py
 
+
+# Local secret and virtual environment variants
+.env.*
+!.env.example
+venv/

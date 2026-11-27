@@ -132,7 +132,7 @@ def analyze_counterexamples(extraction, consistency, sections=None, debug=None):
             except ValueError as exc:
                 entry['attempts'].append({'attempt':attempt, 'error':str(exc)})
                 payload = dict(payload, validation_error=str(exc))
-                print(f'[DIRECT CORRECTION] {exc}')
+                print(f'[DIRECT CORRECTION] {type(exc).__name__}')
                 continue
             result = parsed
             entry['attempts'].append({'attempt':attempt,'status':'valid'})

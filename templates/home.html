@@ -1,0 +1,55 @@
+<main class="dashboard">
+  <section class="hero" aria-labelledby="app-title">
+    <div class="hero-copy">
+      <p class="event-line"><span data-msg="hackathonProject">Проект для хакатона</span>
+        <a href="https://bcchubagents.mnu.kz/" target="_blank" rel="noopener">BCC-HUB × MNU FinTech Hackathon</a>
+      </p>
+      <h1 id="app-title"><span data-msg="heroTitle">Проверка ТЗ</span>
+        <span class="hero-accent" data-msg="heroAccent">до разработки</span>
+      </h1>
+      <p class="lead" data-msg="dashboardLead">Найдите спорные места в ТЗ, согласуйте правки и передайте команде готовую версию.</p>
+      <div class="cta-row">
+        <a class="btn-primary" href="/audit"><span data-msg="newAudit">Новая проверка</span><span aria-hidden="true">↗</span></a>
+        <a class="btn-ghost hidden" id="demo-link" href="/audit?demo=1"><span data-msg="seeExample">Смотреть пример</span><span aria-hidden="true">↗</span></a>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="hero-art" id="hero-art" role="group" tabindex="0" data-label="sceneControl" aria-label="Поверните 3D-иллюстрацию стрелками">
+        <div class="scene-floor" aria-hidden="true"></div>
+        <div class="scene-motion" aria-hidden="true">
+          <div class="scene-folios">
+            <div class="scene-folio"><span></span></div>
+            <div class="scene-folio"><span></span></div>
+            <div class="scene-folio"><span></span></div>
+            <div class="scene-folio"><span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="dashboard-overview" aria-labelledby="overview-title">
+    <div class="dashboard-heading">
+      <h2 id="overview-title" data-msg="dashboardOverview">Последняя проверка</h2>
+      <span id="overview-origin" class="hint"></span>
+    </div>
+    <div class="dashboard-metrics">
+      <div class="dashboard-metric"><span data-msg="score">Готовность ТЗ</span><strong id="overview-score">—</strong></div>
+      <div class="dashboard-metric"><span data-msg="findingsTotal">Замечания</span><strong id="overview-findings">—</strong></div>
+      <div class="dashboard-metric"><span data-msg="High">Критично</span><strong id="overview-critical">—</strong></div>
+      <div class="dashboard-metric"><span data-msg="requirementCount">Требования</span><strong id="overview-requirements">—</strong></div>
+    </div>
+  </section>
+
+  <div class="dashboard-columns">
+    <section class="card dashboard-panel" aria-labelledby="recent-title">
+      <h2 id="recent-title" data-msg="recentAudits">Последние проверки</h2>
+      <div id="recent-audits"></div>
+    </section>
+    <section class="card dashboard-panel" aria-labelledby="attention-title">
+      <h2 id="attention-title" data-msg="needsAttention">Что требует внимания</h2>
+      <div id="attention-items"></div>
+    </section>
+  </div>
+
+</main>

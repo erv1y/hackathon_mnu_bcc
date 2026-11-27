@@ -3,7 +3,7 @@ import sys
 import types
 from unittest.mock import patch
 from core.models import Requirement, ExtractionResult, ConsistencyAnalysisResult
-from core.business_logic import FormalizationResult, check_scenarios, formalize_and_check
+from core.business_logic import FormalizationResult, PairResult, SemanticResult, check_scenarios, formalize_and_check, select_pairs
 
 
 def req(id, text):
@@ -88,17 +88,20 @@ def main():
     # Test integration with the LLM boundary without requiring keys or network.
     model=FormalizationResult.model_validate({'scenarios':[s]})
     existing=ConsistencyAnalysisResult(findings=check_scenarios(model,quota),summary='Existing')
+    pair_id = select_pairs(quota)[0]['pair_id']
+    first = PairResult(reviews=[dict(pair_id=pair_id, status='modeled', reason='Same quota', scenarios=model.scenarios)])
+    second = SemanticResult(reviews=[dict(pair_id=pair_id, decision='accept', reason='Rules overlap', scenarios=model.scenarios)])
     fake=types.ModuleType('core.llm_client')
     calls=[]
     def ask(**kwargs):
         calls.append(kwargs)
         if len(calls)==1:
             return '{"invalid":true}'
-        return model.model_dump_json()
+        return (first if len(calls) == 2 else second).model_dump_json()
     fake.ask_gemini=ask
     with patch.dict(sys.modules,{'core.llm_client':fake}):
         result=formalize_and_check(quota,existing)
-    assert len(calls)==2 and len(result.findings)==2
+    assert len(calls)==3 and len(result.findings)==2
     assert len({f.id for f in result.findings})==2
     assert result.findings[0]==existing.findings[0]
     assert result.findings[1].id=='LOGIC-002'

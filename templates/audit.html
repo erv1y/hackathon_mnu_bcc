@@ -1,0 +1,276 @@
+<main id="audit" aria-labelledby="audit-title">
+  <div class="audit-header">
+    <h1 id="audit-title" data-msg="auditTitle">Проверка технического задания</h1>
+    <div class="actions">
+      <a id="new-audit" class="btn-ghost hidden" href="/audit" data-msg="newAudit">Новая проверка</a>
+      <button type="button" class="btn-ghost hidden" id="demo-btn" data-msg="seeExample">Смотреть пример</button>
+    </div>
+  </div>
+  <div class="audit-flow" id="audit-flow" data-stage="upload">
+    <p id="form-error" class="error-text flow-error hidden" role="alert"></p>
+    <div class="audit-setup">
+    <section class="card input-section" aria-labelledby="input-title">
+      <h2 class="section-title" id="input-title" data-msg="addDocument">Добавьте документ</h2>
+      <p class="input-description" data-msg="uploadDescription">Посмотрим, что описано в ТЗ, затем проверим требования и предложим правки.</p>
+      <div class="tabs" role="tablist" aria-label="Как добавить ТЗ" data-label="inputChoices">
+        <button type="button" class="tab active" id="file-tab-button" data-tab="file-tab" role="tab" aria-selected="true" aria-controls="file-tab" data-msg="uploadTab">Загрузить файл</button>
+        <button type="button" class="tab" id="text-tab-button" data-tab="text-tab" role="tab" aria-selected="false" aria-controls="text-tab" tabindex="-1" data-msg="pasteTab">Вставить текст</button>
+      </div>
+
+      <div id="text-tab" class="tab-content" role="tabpanel" aria-labelledby="text-tab-button">
+        <div class="label-row">
+          <label for="spec-text" data-msg="inputText">Текст задания</label>
+          <button type="button" id="clear-btn" class="link-btn" data-msg="clear">Очистить</button>
+        </div>
+        <div id="preset-bar" class="chip-row" aria-label="Готовые примеры" data-label="presets"></div>
+        <textarea id="spec-text" rows="11" spellcheck="false" placeholder="Вставьте текст или выберите пример" data-placeholder="textPlaceholder" aria-describedby="char-counter"></textarea>
+        <div class="field-footer">
+          <span class="hint" data-msg="hotkey">Ctrl + Enter — проверить</span>
+          <span id="char-counter" class="hint"></span>
+        </div>
+      </div>
+
+      <div id="file-tab" class="tab-content active" role="tabpanel" aria-labelledby="file-tab-button">
+        <label id="dropzone" class="dropzone" for="spec-file">
+          <input type="file" id="spec-file" accept=".pdf,.docx,.txt,.md" multiple aria-describedby="file-limit-hint">
+          <span class="upload-icon" aria-hidden="true"><span id="upload-glyph">↑</span></span>
+          <span class="dropzone-title" data-msg="dropZoneTitle">Перетащите документ сюда</span>
+          <span class="dropzone-browse" data-msg="browseFile">Выбрать файл</span>
+          <span id="file-limit-hint" class="hint">PDF, DOCX, TXT или MD</span>
+        </label>
+        <section id="file-info" class="file-info hidden" aria-labelledby="file-info-title">
+          <h3 id="file-info-title"></h3>
+          <ul id="file-list" class="file-list"></ul>
+        </section>
+      </div>
+
+      <details id="extra-box" class="extra-box">
+        <summary data-msg="extra">Добавить детали о проекте</summary>
+        <label for="extra-context" data-msg="extraLabel">Что важно учесть при проверке?</label>
+        <textarea id="extra-context" rows="3" placeholder="Например, кто ваши клиенты и какие операции вы планируете" data-placeholder="extraPlaceholder" aria-describedby="context-counter"></textarea>
+        <div class="field-footer">
+          <button type="button" id="context-clear" class="link-btn" data-msg="clearExtra">Очистить детали</button>
+          <span id="context-counter" class="hint"></span>
+        </div>
+      </details>
+
+      <label class="remember-draft hidden" id="remember-row"><input id="remember-draft" type="checkbox"> <span data-msg="remember">Запомнить текст на этом устройстве</span></label>
+    </section>
+    <aside class="setup-sidebar">
+      <section class="card setup-panel" aria-labelledby="mode-title">
+        <fieldset id="check-mode" class="check-mode">
+          <legend id="mode-title" data-msg="chooseMode">Режим проверки</legend>
+          <div class="mode-options">
+            <label class="mode-option">
+              <input type="radio" name="check-mode" value="quick">
+              <span><strong data-msg="modeQuick">Быстрая</strong><span id="quick-description" class="hint" data-msg="quickDescription">Главные риски для денег, данных и запуска.</span></span>
+              <span id="quick-rules" class="mode-coverage"></span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="check-mode" value="deep" checked>
+              <span><strong data-msg="modeDeep">Глубокая</strong><span id="deep-description" class="hint" data-msg="deepDescription">Все критерии, связи между файлами и спорные формулировки.</span></span>
+              <span id="deep-rules" class="mode-coverage"></span>
+            </label>
+          </div>
+        </fieldset>
+        <p id="setup-engine" class="hint"></p>
+        <label id="gemini-consent-row"><input type="checkbox" id="gemini-consent"> <span data-msg="consentGemini">Разрешаю передать текст документов в Gemini API.</span></label>
+        <label id="cache-consent-row"><input type="checkbox" id="cache-consent"> <span data-msg="cacheOptIn">Сохранять незашифрованные контрольные точки SQLite на сервере</span></label>
+        <div class="run-row">
+          <button type="button" id="run-btn" class="btn-primary" data-msg="startAnalysis">Начать проверку</button>
+        </div>
+      </section>
+      <section class="example-panel">
+        <h2 data-msg="refundExampleTitle">Попробуйте на двух файлах</h2>
+        <p class="hint" data-msg="refundExampleHint">В примере описаны правила возврата и работа сервиса. Сравните, что сказано в обоих документах.</p>
+        <a class="link-btn" href="/audit?example=refund" data-msg="openRefundExample">Добавить пример возврата</a>
+      </section>
+    </aside>
+    </div>
+
+    <section class="card output-section" aria-labelledby="output-title">
+      <h2 class="section-title" id="output-title" data-msg="result">Результат проверки</h2>
+      <div id="progress" class="progress hidden">
+        <div class="progress-head">
+          <strong id="progress-title" role="status">Готовим проверку</strong>
+          <span id="progress-timer" class="timer" aria-hidden="true"></span>
+        </div>
+        <progress id="progress-bar" value="0" max="1" aria-label="Ход проверки" data-label="progress"></progress>
+        <ol id="workflow-steps" class="workflow-steps"></ol>
+        <section id="live-preview" class="document-summary hidden" aria-live="polite"></section>
+        <details id="progress-details" class="audit-details hidden">
+          <summary data-msg="technicalDetails">Детали проверки</summary>
+          <ul id="agent-list" class="agent-list"></ul>
+        </details>
+        <button type="button" id="cancel-btn" class="btn-secondary hidden" data-msg="cancel">Отмена</button>
+      </div>
+
+      <div id="results" class="hidden">
+        <div id="demo-comparison" class="demo-comparison hidden">
+          <p class="eyebrow" data-msg="exampleLabel">Учебный пример · сохранённые ответы</p>
+          <div class="comparison-choices" role="group" aria-label="Версия документа" data-label="versionLabel">
+            <button type="button" id="demo-before" class="btn-secondary" aria-pressed="true"></button>
+            <button type="button" id="demo-after" class="btn-secondary" aria-pressed="false"></button>
+          </div>
+          <details id="demo-source" class="audit-details"><summary data-msg="exampleText">Посмотреть текст примера</summary><pre id="demo-text"></pre></details>
+        </div>
+        <p id="stale-report" class="warning-box hidden"></p>
+        <p id="report-language" class="result-meta hidden" data-msg="reportLanguage"></p>
+        <h3 id="result-title" class="report-title"></h3>
+        <p id="native-status" class="result-meta hidden"></p>
+        <details id="native-graph" class="audit-details hidden"><summary data-msg="traceGraph">Граф требований</summary><div id="native-graph-content"></div></details>
+        <details id="native-audit" class="audit-details hidden"><summary data-msg="auditTrail">Решения аудитора</summary><ul id="native-audit-content"></ul></details>
+        <div class="metrics">
+          <div id="score-card" class="metric-card score">
+            <span id="score-label" class="metric-label" data-msg="score">Готовность ТЗ</span>
+            <span id="score-val" class="metric-value">—</span>
+            <span id="score-status" class="metric-note"></span>
+          </div>
+          <div class="metric-card high">
+            <span class="metric-label" data-msg="High">Критично</span>
+            <span id="high-val" class="metric-value">0</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label" data-msg="findingsTotal">Замечания</span>
+            <span id="total-val" class="metric-value">0</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label" data-msg="requirementCount">Требования</span>
+            <span id="requirements-val" class="metric-value">0</span>
+          </div>
+        </div>
+        <p id="result-meta" class="result-meta"></p>
+        <div id="quick-followup" class="review-panel quick-followup hidden">
+          <p data-msg="quickScope">Проверены главные риски. Глубокая проверка охватит остальные критерии.</p>
+          <button type="button" id="deepen-btn" class="btn-secondary" data-msg="deepen">Допроверить глубоко</button>
+        </div>
+        <div id="sanity-notice" class="review-panel quick-followup hidden">
+          <strong id="sanity-notice-text"></strong>
+          <button type="button" id="sanity-open" class="link-btn" data-msg="seeScenarios">К сценариям</button>
+        </div>
+        <p id="partial-warning" class="warning-box hidden" role="status"></p>
+        <section class="decision-panel" id="review-decision" aria-labelledby="decision-title">
+          <div><h3 id="decision-title"></h3><p id="decision-copy"></p></div>
+          <ul id="decision-findings"></ul>
+        </section>
+        <details id="check-details" class="audit-details">
+          <summary data-msg="technicalDetails">Детали проверки</summary>
+          <div id="check-content" class="audit-details-content"></div>
+          <div id="module-tabs" class="module-tabs" role="group" aria-label="Проверки" data-label="navAudit"></div>
+        </details>
+        <div class="report-workspace">
+        <div id="review-tabs" class="review-tabs" role="tablist" aria-label="Результат проверки" data-label="result">
+          <button type="button" class="tab active" id="review-report-tab" data-review-tab="report" role="tab" aria-selected="true" aria-controls="review-report" data-msg="reviewReport">Отчёт</button>
+          <button type="button" class="tab" id="review-requirements-tab" data-review-tab="requirements" role="tab" aria-selected="false" aria-controls="review-requirements" tabindex="-1" data-msg="reviewRequirements">Требования</button>
+          <button type="button" class="tab" id="review-fixes-tab" data-review-tab="fixes" role="tab" aria-selected="false" aria-controls="review-fixes" tabindex="-1" data-msg="reviewFixes">Правки</button>
+          <button type="button" class="tab" id="review-questions-tab" data-review-tab="questions" role="tab" aria-selected="false" aria-controls="review-questions" tabindex="-1" data-msg="reviewQuestions">Вопросы</button>
+          <button type="button" class="tab" id="review-scenarios-tab" data-review-tab="scenarios" role="tab" aria-selected="false" aria-controls="review-scenarios" tabindex="-1" data-msg="reviewScenarios">Сценарии</button>
+          <button type="button" class="tab" id="review-compare-tab" data-review-tab="compare" role="tab" aria-selected="false" aria-controls="review-compare" tabindex="-1" data-msg="reviewCompare">Сравнение</button>
+        </div>
+        <div class="report-view">
+        <div id="review-report" data-review-pane="report" role="tabpanel" aria-labelledby="review-report-tab">
+          <div class="comparison-notice review-panel hidden" id="comparison-notice" role="status">
+            <strong id="comparison-notice-text"></strong>
+            <button type="button" class="link-btn" id="comparison-open" data-msg="seeComparison">К сравнению</button>
+          </div>
+          <details id="role-summaries" class="audit-details hidden">
+            <summary data-msg="roleSummary">Сводка по ролям</summary>
+            <div id="role-summary-cards" class="role-summary-cards"></div>
+          </details>
+          <div class="results-toolbar">
+            <div id="severity-filter" class="chip-row" role="group" aria-label="Уровни важности" data-label="severityFilter"></div>
+            <div class="actions">
+              <button id="copy-all-btn" class="btn-secondary" type="button" data-msg="copyFixes">Копировать правки</button>
+              <button id="print-report-btn" class="btn-primary" type="button" data-msg="printReport">PDF / Печать</button>
+              <button id="export-btn" class="btn-secondary" type="button" data-msg="markdown">Скачать отчёт</button>
+              <button id="native-pdf-btn" class="btn-secondary hidden" type="button" data-msg="nativePdf">Скачать PDF</button>
+              <button id="export-json-btn" class="btn-secondary" type="button" data-msg="json">Скачать данные</button>
+            </div>
+          </div>
+          <div id="defects-list" class="defects-list"></div>
+        </div>
+        <div id="review-requirements" data-review-pane="requirements" role="tabpanel" aria-labelledby="review-requirements-tab" class="review-pane hidden">
+          <div class="review-panel">
+            <h3 data-msg="riskMap">Карта рисков по строкам</h3>
+            <p class="hint" data-msg="mapHint">Выберите фрагмент, чтобы увидеть его текст и замечания.</p>
+            <div id="risk-legend" class="risk-legend"></div>
+            <div id="risk-map" class="risk-map"></div>
+            <p id="unmapped-findings" class="hint hidden"></p>
+          </div>
+          <section id="requirement-connections" class="review-panel hidden"></section>
+          <div id="requirements-list" class="review-list"></div>
+          <div id="requirements-pages" class="review-pagination"></div>
+        </div>
+        <div id="review-fixes" data-review-pane="fixes" role="tabpanel" aria-labelledby="review-fixes-tab" class="review-pane hidden">
+          <p class="hint" data-msg="fixesHint">Выберите правки для черновика. Вопросы по спорным пунктам можно обсудить с командой.</p>
+          <div class="fix-workspace">
+            <div id="fixes-list" class="fix-list"></div>
+            <div id="active-fix" tabindex="-1"></div>
+          </div>
+          <div id="revised-draft" class="review-panel hidden" tabindex="-1">
+            <div class="review-panel-head">
+              <h3 data-msg="revisedDraft">Черновик с правками</h3>
+              <div class="actions">
+                <button id="save-version" type="button" class="btn-secondary" data-msg="saveVersion">Сохранить версию</button>
+                <button id="download-revised" type="button" class="btn-primary" data-msg="downloadDraft">Скачать текст</button>
+                <button id="audit-revised" type="button" class="btn-secondary hidden" data-msg="auditRevised">Проверить версию с правками</button>
+              </div>
+            </div>
+            <div class="fix-comparison document-compare">
+              <div><h4 data-msg="originalDocument">Исходный документ</h4><pre id="original-preview" class="review-source" tabindex="0"></pre></div>
+              <div><h4 data-msg="revisedDocument">Документ с правками</h4><pre id="revised-preview" class="review-source" tabindex="0"></pre></div>
+            </div>
+          </div>
+          <section id="version-history" class="review-panel hidden"></section>
+        </div>
+        <div id="review-questions" data-review-pane="questions" role="tabpanel" aria-labelledby="review-questions-tab" class="review-pane hidden">
+          <section id="customer-questions" class="review-panel" aria-labelledby="customer-questions-title">
+            <div class="review-panel-head">
+              <h3 id="customer-questions-title" data-msg="customerQuestions">Вопросы заказчику</h3>
+              <div class="actions">
+                <button type="button" class="btn-secondary" id="copy-questions" data-msg="copyQuestions">Копировать список</button>
+                <button type="button" class="btn-secondary" id="download-questions" data-msg="downloadQuestions">Скачать список</button>
+              </div>
+            </div>
+            <div id="customer-question-list" class="review-list"></div>
+          </section>
+          <form id="question-form" class="review-panel">
+            <label for="question-input" data-msg="questionLabel">Что хотите узнать о ТЗ?</label>
+            <div class="question-row">
+              <input id="question-input" type="text" maxlength="500" required data-placeholder="questionPlaceholder" placeholder="Например, когда покупатель увидит чек?">
+              <button id="question-send" type="submit" class="btn-primary" data-msg="askQuestion">Спросить</button>
+            </div>
+            <div class="chip-row" role="group" aria-label="Примеры вопросов" data-label="quickQuestions">
+              <button type="button" class="chip" data-intent="risks" data-msg="askRisks">Что исправить сначала?</button>
+              <button type="button" class="chip" data-intent="impact" data-msg="askImpact">Кого это затронет?</button>
+              <button type="button" class="chip" data-intent="clarify" data-msg="askClarify">Что спросить у заказчика?</button>
+              <button type="button" class="chip" data-intent="score" data-msg="askScore">Откуда такая оценка?</button>
+            </div>
+          </form>
+          <div id="question-answer" role="status" class="review-list" aria-live="polite"></div>
+        </div>
+        <div id="review-scenarios" data-review-pane="scenarios" role="tabpanel" aria-labelledby="review-scenarios-tab" class="review-pane hidden">
+          <section id="sanity-findings" class="review-panel"></section>
+          <section id="ambiguous-findings" class="review-panel"></section>
+          <section id="defensive-scenarios" class="review-panel"></section>
+        </div>
+        <div id="review-compare" data-review-pane="compare" role="tabpanel" aria-labelledby="review-compare-tab" class="review-pane hidden">
+          <section class="review-panel">
+            <div class="review-panel-head">
+              <h3 data-msg="compareTitle">Что изменилось между версиями</h3>
+              <a class="btn-secondary" href="/audit" data-msg="checkAnotherVersion">Проверить другой файл или пакет</a>
+            </div>
+            <div class="compare-fields">
+              <label for="compare-baseline"><span data-msg="before">Было</span><select id="compare-baseline"></select></label>
+              <div><span class="hint" data-msg="after">Стало</span><strong id="compare-current"></strong></div>
+            </div>
+            <p class="hint" id="compare-help"></p>
+          </section>
+          <div id="comparison-results" class="review-list" aria-live="polite"></div>
+        </div>
+        </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>

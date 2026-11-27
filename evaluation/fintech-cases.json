@@ -1,0 +1,127 @@
+{
+  "id": "fintech-starter",
+  "version": "1.1.0",
+  "demo": {
+    "ru": { "before": "checkout-before", "after": "checkout-after" },
+    "kk": { "before": "checkout-before-kk", "after": "checkout-after-kk" },
+    "en": { "before": "checkout-before-en", "after": "checkout-after-en" }
+  },
+  "gates": {
+    "precision": 0.8,
+    "recall": 0.7,
+    "high_recall": 0.75,
+    "verified_quote_rate": 0.8,
+    "agent_success_rate": 1.0
+  },
+  "cases": [
+    {
+      "id": "checkout-before",
+      "title": "Оплата заказа · исходный вариант",
+      "text": "1. Покупатель может оплатить заказ картой.\n2. При сетевой ошибке покупатель может отправить оплату заново. Каждый такой запрос создаёт новое списание.\n3. При успешной оплате заказ получает статус «Оплачен», при отказе — «Не оплачен».\n4. Код безопасности карты сохраняется в профиле после оплаты.\n5. Подтверждение оплаты должно отображаться достаточно быстро.\n6. Покупатель видит чек сразу после успешной оплаты.\n7. Покупатель видит чек только после ручного подтверждения оператором.",
+      "context": "Учебный пример экрана оплаты. Возвраты, проверка личности и личный кабинет сотрудников описываются отдельно. В этой проверке оцениваются только явно описанные сценарии.",
+      "expected": [
+        { "criterion_id": "payment.retry", "severity": "High", "evidence": "exact", "anchors": ["Каждый такой запрос создаёт новое списание"] },
+        { "criterion_id": "data.card", "severity": "High", "evidence": "exact", "anchors": ["Код безопасности карты сохраняется в профиле"] },
+        { "criterion_id": "spec.testability", "severity": "Medium", "evidence": "exact", "anchors": ["отображаться достаточно быстро"] },
+        {"criterion_id": "spec.contradiction", "severity": "High", "evidence": "exact", "anchors": ["Покупатель видит чек сразу после успешной оплаты.", "Покупатель видит чек только после ручного подтверждения оператором."]}
+      ]
+    },
+    {
+      "id": "checkout-after",
+      "title": "Оплата заказа · после исправлений",
+      "text": "1. Покупатель может оплатить заказ картой через страницу платёжного партнёра.\n2. Повторный запрос с тем же идентификатором заказа и попытки возвращает состояние первой попытки. Он не создаёт новое списание.\n3. При подтверждении заказ получает статус «Оплачен», при отказе — «Не оплачен». Пока ответ неизвестен, статус «Проверяем оплату». Новый запрос на списание не отправляется, пока партнёр не подтвердит исход первой попытки.\n4. Сервис хранит статус и идентификатор операции. Код безопасности карты сервис не получает и не хранит.\n5. Интерфейс показывает новый статус не позже двух секунд после его получения сервером в тестовой среде.\n6. Чек показывается после успешной оплаты и не требует подтверждения оператора.",
+      "context": "Учебный пример экрана оплаты. Две секунды — параметр этого примера. Возвраты, проверка личности и кабинет сотрудников вне объёма.",
+      "expected": []
+    },
+    {
+      "id": "fee-rounding",
+      "title": "Расчёт комиссии",
+      "text": "Модуль показывает пример будущей комиссии без движения денег.\nКомиссия составляет 1% от суммы, округление на усмотрение разработчика.\nИсходная сумма и результат отображаются в тенге с двумя знаками после запятой.",
+      "expected": [
+        { "criterion_id": "payment.amount", "severity": "Medium", "evidence": "exact", "anchors": ["округление на усмотрение разработчика"] }
+      ]
+    },
+    {
+      "id": "conflicting-history",
+      "title": "Два разных правила для истории операций",
+      "text": "Экран показывает историю уже выполненных переводов, без возможности отправить новый.\nРаздел 2. После закрытия счёта история переводов всегда доступна клиенту в приложении.\nРаздел 5. После закрытия счёта клиент не может открыть историю переводов в приложении.",
+      "expected": [
+        { "criterion_id": "spec.contradiction", "severity": "High", "evidence": "exact", "anchors": ["история переводов всегда доступна", "клиент не может открыть историю"] }
+      ]
+    },
+    {
+      "id": "public-info",
+      "title": "Справочный раздел без операций",
+      "text": "Публичный экран показывает расписание работы отделений из опубликованного справочника.\nПри отсутствии записи показывается сообщение «Расписание недоступно» со ссылкой на список отделений.\nЭкран не принимает платежи, не требует входа и не собирает данные клиента.",
+      "expected": []
+    },
+    {
+      "id": "customer-gate",
+      "title": "Проверка клиента перед первым переводом",
+      "text": "Приложение принимает первые переводы между клиентами после регистрации.\nВ ТЗ описаны подтверждение номера телефона, статусы операции и экран квитанции.\nДля подтверждения перевода сервер использует результат завершённой операции у партнёра. Повтор при неизвестном исходе не создаёт второе списание.",
+      "context": "В этом вымышленном продукте по решению владельца финансовые операции доступны только после проверки личности. Проверить, описано ли это условие в ТЗ.",
+      "expected": [
+        { "criterion_id": "client.identity", "severity": "High", "evidence": "missing" }
+      ]
+    },
+    {
+      "id": "exposed-profile",
+      "title": "Доступ к личным данным",
+      "text": "Личный кабинет показывает данные, которые клиент предоставил при регистрации.\nПри формировании публичной ссылки в ответ включаются адрес и номер документа клиента.\nСсылка доступна любому человеку без входа и копируется одной кнопкой.",
+      "expected": [
+        { "criterion_id": "data.privacy", "severity": "High", "evidence": "exact", "anchors": ["в ответ включаются адрес и номер документа клиента"] }
+      ]
+    },
+    {
+      "id": "refund-controls",
+      "title": "Отдельные пробелы в возврате",
+      "text": "Оператор открывает оплаченную операцию и отправляет частичный возврат партнёру.\nСумма возврата может превышать исходное списание.\nКаждый повтор одного запроса на возврат создаёт новую операцию.\nПартнёр отвечает итоговым статусом, который виден оператору в карточке.",
+      "expected": [
+        { "criterion_id": "payment.refund", "severity": "High", "evidence": "exact", "anchors": ["Сумма возврата может превышать исходное списание"] },
+        { "criterion_id": "payment.refund", "severity": "High", "evidence": "exact", "anchors": ["Каждый повтор одного запроса на возврат создаёт новую операцию"] }
+      ]
+    },
+    {
+      "id": "checkout-before-en",
+      "language": "en",
+      "title": "Checkout · before edits",
+      "text": "1. The customer can pay by card.\n2. After a network error, the customer can send the payment again. Every retry creates a new charge.\n3. A successful payment marks the order as paid. A decline marks it unpaid.\n4. The card security code is saved in the customer profile after checkout.\n5. Payment confirmation should appear reasonably quickly.\n6. The customer sees the receipt immediately after a successful payment.\n7. The customer sees the receipt only after manual approval by an operator.",
+      "context": "A synthetic checkout example. Refunds, customer identity checks and staff accounts are out of scope. Review the flows described in this document.",
+      "expected": [
+        { "criterion_id": "payment.retry", "severity": "High", "evidence": "exact", "anchors": ["Every retry creates a new charge"] },
+        { "criterion_id": "data.card", "severity": "High", "evidence": "exact", "anchors": ["card security code is saved in the customer profile"] },
+        { "criterion_id": "spec.testability", "severity": "Medium", "evidence": "exact", "anchors": ["appear reasonably quickly"] },
+        {"criterion_id": "spec.contradiction", "severity": "High", "evidence": "exact", "anchors": ["The customer sees the receipt immediately after a successful payment.", "The customer sees the receipt only after manual approval by an operator."]}
+      ]
+    },
+    {
+      "id": "checkout-after-en",
+      "language": "en",
+      "title": "Checkout · after edits",
+      "text": "1. The customer pays on the payment partner's card checkout page.\n2. A retry with the same order and attempt IDs returns the original attempt status without creating a new charge.\n3. Payment is marked paid on confirmation, unpaid on decline and pending while the result is unknown. A new charge is blocked until the partner confirms the first attempt's result.\n4. The service stores only the payment status and ID. It does not receive or retain the card security code.\n5. In the test environment, the page displays the updated status within two seconds of the server receiving it.\n6. The receipt appears after successful payment and needs no manual approval.",
+      "context": "A synthetic checkout example. Two seconds is a test target for this example. Refunds, identity checks and staff accounts are out of scope.",
+      "expected": []
+    },
+    {
+      "id": "checkout-before-kk",
+      "language": "kk",
+      "title": "Тапсырыс төлемі · бастапқы нұсқа",
+      "text": "1. Сатып алушы тапсырысты картамен төлей алады.\n2. Желіде қате болса, сатып алушы төлемді қайта жібере алады. Әр қайталауда ақша қайта алынады.\n3. Төлем сәтті болса, тапсырыс «Төленді» күйіне өтеді. Төлем өтпесе, күйі «Төленбеді» болады.\n4. Төлемнен кейін картаның қауіпсіздік коды клиент профилінде сақталады.\n5. Төлем расталғаны жеткілікті жылдам көрсетілуі тиіс.\n6. Сатып алушы төлем сәтті аяқталған соң түбіртекті бірден көреді.\n7. Сатып алушы түбіртекті оператор қолмен растағаннан кейін ғана көреді.",
+      "context": "Бұл тапсырыс төлеміне арналған оқу мысалы. Ақша қайтару, жеке басты тексеру және қызметкерлердің кабинеті бұл тапсырмаға кірмейді.",
+      "expected": [
+        { "criterion_id": "payment.retry", "severity": "High", "evidence": "exact", "anchors": ["Әр қайталауда ақша қайта алынады"] },
+        { "criterion_id": "data.card", "severity": "High", "evidence": "exact", "anchors": ["картаның қауіпсіздік коды клиент профилінде сақталады"] },
+        { "criterion_id": "spec.testability", "severity": "Medium", "evidence": "exact", "anchors": ["жеткілікті жылдам көрсетілуі тиіс"] },
+        {"criterion_id": "spec.contradiction", "severity": "High", "evidence": "exact", "anchors": ["Сатып алушы төлем сәтті аяқталған соң түбіртекті бірден көреді.", "Сатып алушы түбіртекті оператор қолмен растағаннан кейін ғана көреді."]}
+      ]
+    },
+    {
+      "id": "checkout-after-kk",
+      "language": "kk",
+      "title": "Тапсырыс төлемі · түзетілген нұсқа",
+      "text": "1. Сатып алушы төлем серіктесінің бетінде картамен төлейді.\n2. Тапсырыс нөмірі мен әрекет нөмірі бірдей сұрау қайталанса, сервис бірінші әрекеттің күйін қайтарады. Ақша екінші рет алынбайды.\n3. Төлем расталса, күйі «Төленді», төлем өтпесе, «Төленбеді» болады. Нәтиже белгісіз болса, «Төлем тексеріліп жатыр» күйі көрсетіледі. Серіктес бірінші әрекеттің нәтижесін растамайынша, сервис ақшаны қайта алмайды.\n4. Сервис төлем күйі мен нөмірін ғана сақтайды. Картаның қауіпсіздік кодын алмайды және сақтамайды.\n5. Сынақ ортасында сервер төлем күйін алғаннан кейін, ол экранда екі секунд ішінде жаңартылады.\n6. Төлем сәтті аяқталғанда түбіртек көрсетіледі, оператордың растауы қажет емес.",
+      "context": "Бұл тапсырыс төлеміне арналған оқу мысалы. Екі секунд — осы мысалдың сынақ көрсеткіші. Ақша қайтару, жеке басты тексеру және қызметкерлердің кабинеті бұл тапсырмаға кірмейді.",
+      "expected": []
+    }
+  ]
+}

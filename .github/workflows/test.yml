@@ -1,0 +1,39 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m evaluate --check
+      - run: python -m evaluate_quality
+      - run: python -m evaluate_graph --check-data
+      - name: Native LangGraph offline suites
+        run: |
+          set -e
+          for test in test_*v08.py test_release_review.py; do
+            python "$test"
+          done
+  windows-tests:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest tests.test_graph_web -v
+      - run: python main.py --help
